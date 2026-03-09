@@ -54,6 +54,7 @@ export function UploadModal({
   open,
   onClose,
   onUploadStarted,
+  onUploadFailed,
   onSuccess,
   isInternal = false,
   plans = [],
