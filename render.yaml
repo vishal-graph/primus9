@@ -6,8 +6,8 @@ services:
   - type: web
     name: primus9-api
     runtime: docker
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     region: singapore
     plan: starter
     healthCheckPath: /health
@@ -25,8 +25,8 @@ services:
   - type: worker
     name: primus9-worker
     runtime: docker
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     region: singapore
     plan: starter
     numInstances: 1
