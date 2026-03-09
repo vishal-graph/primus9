@@ -26,12 +26,25 @@ const nextConfig = {
 
   // API proxy to backend
   async rewrites() {
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+    // Vercel server-side doesn't always read NEXT_PUBLIC_ variables during runtime proxy config
+    // We check BACKEND_API_URL first, then NEXT_PUBLIC_API_URL, then localhost
+    const backendUrl = 
+      process.env.BACKEND_API_URL || 
+      process.env.NEXT_PUBLIC_API_URL || 
+      'http://localhost:4000';
+      
+    // IMPORTANT: Make sure backendUrl doesn't have a trailing slash
+    const cleanBackendUrl = backendUrl.replace(/\/$/, '');
+    
     return [
       {
         source: '/api/:path*',
-        destination: `${backendUrl}/api/:path*`,
+        destination: `${cleanBackendUrl}/api/:path*`,
       },
+      {
+        source: '/api/v1/:path*',
+        destination: `${cleanBackendUrl}/api/v1/:path*`,
+      }
     ];
   },
 
