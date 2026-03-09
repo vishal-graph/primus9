@@ -13,6 +13,9 @@ const connection = {
   host: new URL(config.redisUrl).hostname,
   port: parseInt(new URL(config.redisUrl).port || '6379'),
   password: new URL(config.redisUrl).password || undefined,
+  tls: config.redisUrl.startsWith('rediss://') ? {} : undefined,
+  family: 0, // Force IPv4/IPv6 heuristic (required for some Redis providers)
+  keepAlive: 10000, // Important for Upstash serverless connections
 };
 
 logger.info({
