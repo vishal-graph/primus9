@@ -607,6 +607,16 @@ async function enqueueToBullMQ(
       bullmqJobId: job.id,
     }, 'Job enqueued to BullMQ');
 
+    // -- RENDER FREE TIER HACK --
+    // Ping the worker's dummy HTTP server to wake it up from sleep.
+    // This allows the worker to stay on the free tier but guarantees it 
+    // wakes up within ~50s when a new job arrives.
+    // 'primus9-workerr' is the worker URL you provided.
+    const workerUrl = 'https://primus9-workerr.onrender.com';
+    fetch(workerUrl).catch(err => {
+      logger.error({ error: err.message }, 'Failed to ping worker wakeup URL');
+    });
+
     return job.id as string;
   } catch (error) {
     logger.error({
