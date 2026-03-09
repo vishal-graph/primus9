@@ -1,0 +1,389 @@
+# TatvaOps Vision — Platform Analysis
+
+> **Last Analysed:** 2026-03-03
+
+---
+
+## 1. What Is TatvaOps Vision?
+
+TatvaOps Vision is an **AI-powered interior design platform** for the Indian market. It takes a floor plan image as input and walks users through a multi-stage design pipeline — from floor plan analysis through moodboard creation, 3D isometric elevation, per-room 2D views, component extraction, walkthrough video generation, and PDF export. It is deployed at **https://vision.tatvaops.com** and is a live SaaS product.
+
+---
+
+## 2. High-Level Architecture
+
+```mermaid
+graph TD
+    User["User (Browser)"]
+    FE["Frontend\nNext.js 14 — port 3000"]
+    BE["Backend API\nExpress + TypeScript — port 4000"]
+    W["Worker Service\nTypeScript — SQS consumer"]
+    PG[("PostgreSQL 15\n(AWS RDS Multi-AZ)")]
+    R[("Redis\n(ElastiCache)")]
+    S3["S3 Buckets\n(floorplans / moodboards /\nrenders / exports)"]
+    SQS["AWS SQS Queues\n(6 queues + DLQs)"]
+    Gemini["Google Gemini AI\n(text + image generation)"]
+    Nginx["Nginx\nReverse Proxy"]
+    Clerk["Clerk\n(Auth + JWT)"]
+    Razorpay["Razorpay\n(Payments)"]
+
+    User -->|HTTPS| Nginx
+    Nginx --> FE
+    Nginx --> BE
+    FE -->|REST API| BE
+    BE --> PG
+    BE --> R
+    BE --> S3
+    BE --> SQS
+    BE --> Clerk
+    BE --> Razorpay
+    W --> SQS
+    W --> Gemini
+    W --> S3
+    W --> PG
+    W --> R
+```
+
+### Services at a Glance
+
+| Service | Stack | Role |
+|---|---|---|
+| **Frontend** | Next.js 14, TypeScript, Redux Toolkit, TanStack Query, Framer Motion, MUI | User-facing web application |
+| **Backend** | Express 4, TypeScript, Prisma ORM, BullMQ, Pino, Helmet | REST API, auth, business logic, SQS dispatch |
+| **Worker** | Node.js, TypeScript, AWS SQS, Gemini AI, Sharp, pdf-to-png | Async AI job processor |
+| **Infrastructure** | AWS (EC2 ASG + ALB, RDS, ElastiCache, S3, SQS, CloudWatch), Terraform | Cloud deployment |
+
+---
+
+## 3. Frontend — Next.js Application
+
+### Tech Stack
+- **Framework**: Next.js 14 (App Router)
+- **Auth**: `@clerk/nextjs` — JWT-based, fully integrated
+- **State**: Redux Toolkit + React Query (server state), Zustand (local/feature state)
+- **UI**: MUI v5, Framer Motion, Lucide React, custom CSS
+- **Forms**: React Hook Form + Zod
+- **Maps**: `@react-google-maps/api`
+
+### App Route Structure
+
+```
+src/app/
+├── (auth)/             # Sign-in, Sign-up, OAuth callback
+├── (app)/              # Protected application
+│   ├── dashboard/      # Project list
+│   ├── project/        # Multi-stage project pages
+│   │   ├── [id]/floorplan/
+│   │   ├── [id]/moodboard/
+│   │   ├── [id]/elevation/
+│   │   ├── [id]/2d-views/
+│   │   ├── [id]/components/
+│   │   └── [id]/walkthrough/
+│   ├── upload/         # Floor plan upload
+│   ├── entry/          # Intent collection
+│   ├── onboarding/     # New user flow
+│   ├── pricing/        # Plan selection
+│   ├── checkout/       # Razorpay payment
+│   ├── billing/        # Invoice history
+│   ├── credits/        # Credit wallet
+│   └── profile/        # User settings
+├── (admin)/            # Admin-only pages
+│   └── admin/          # Dashboard, user management
+└── page.tsx            # Marketing landing page
+```
+
+### Feature Modules (`src/features/`)
+- **`project/`** — Project CRUD, stage navigation, job polling
+- **`moodboard/`** — Style selection, generation UI, regeneration
+- **`intent/`** — Design intent questionnaire (SENSE layer)
+
+---
+
+## 4. Backend API — Express Application
+
+### Middleware Stack (in order)
+1. `helmet` — security headers
+2. `cors` — controlled origins
+3. `express.json` (10 MB limit)
+4. `requestIdMiddleware` — tracing
+5. `morgan` → Pino logger
+6. `rateLimiter` (Redis-backed)
+7. `authMiddleware` (Clerk JWT)
+8. `adminAuthMiddleware` (`@tatvaops.com` email gate)
+
+### API Routes
+
+| Route Prefix | Auth | Purpose |
+|---|---|---|
+| `/health` | None | Health check |
+| `/api/webhooks` | Signature-based | Clerk & Razorpay webhooks |
+| `/api/public` | None | Public asset downloads |
+| `/api/user` | Clerk | Profile, onboarding |
+| `/api/projects` | Clerk | Project CRUD, room management |
+| `/api/jobs` | Clerk | AI job status, retry |
+| `/api/uploads` | Clerk | S3 presigned URL generation |
+| `/api/notifications` | Clerk | Notification history |
+| `/api/plans` | Clerk | Plan listing |
+| `/api/billing` | Clerk | Razorpay orders, payment verify |
+| `/api/coupons` | Clerk | Coupon validation |
+| `/api/feedback` | Clerk | Structured feedback submission |
+| `/api/exports` | Clerk | PDF export requests |
+| `/api/sense` | Clerk | Intent Graph (SENSE AI layer) |
+| `/api/think` | Clerk | Spatial Plan (THINK AI layer) |
+| `/api/admin` | Clerk + Admin | Admin dashboard operations |
+
+### Key Backend Services
+
+| Service | Location | Purpose |
+|---|---|---|
+| [plan-guardrails.ts](file:///c:/Users/ayuvv/OneDrive/Documents/TatvaOps/tatvaops-vision/backend/src/services/plan-guardrails.ts) | `services/` | Feature gating, project/room/regen limits, rate limits |
+| [plan-config.ts](file:///c:/Users/ayuvv/OneDrive/Documents/TatvaOps/tatvaops-vision/backend/src/lib/plan-config.ts) | `lib/` | PLAN_CATALOG — single source of truth for plan definitions |
+| [storage.ts](file:///c:/Users/ayuvv/OneDrive/Documents/TatvaOps/tatvaops-vision/backend/src/services/storage.ts) | `services/` | S3 upload/download, presigned URLs |
+| [auth.ts](file:///c:/Users/ayuvv/OneDrive/Documents/TatvaOps/tatvaops-vision/backend/src/services/auth.ts) | `services/` | Clerk token verification helpers |
+| [anomaly-detection.ts](file:///c:/Users/ayuvv/OneDrive/Documents/TatvaOps/tatvaops-vision/backend/src/services/anomaly-detection.ts) | `services/` | Abuse/fraud detection |
+| [sqs.ts](file:///c:/Users/ayuvv/OneDrive/Documents/TatvaOps/tatvaops-vision/backend/src/lib/sqs.ts) | `lib/` | SQS message dispatch |
+| [redis-client.ts](file:///c:/Users/ayuvv/OneDrive/Documents/TatvaOps/tatvaops-vision/backend/src/lib/redis-client.ts) | `lib/` | Rate limiting, caching, progress state |
+| [cloudwatch.ts](file:///c:/Users/ayuvv/OneDrive/Documents/TatvaOps/tatvaops-vision/backend/src/lib/cloudwatch.ts) | `lib/` | Structured log shipping |
+| AI services | `services/ai/` | Base Gemini client, per-feature generation wrappers |
+
+---
+
+## 5. Worker Service — AI Job Processor
+
+### Architecture
+- Polls **6 SQS queues** concurrently using long polling (20s wait)
+- Configurable concurrency (`WORKER_CONCURRENCY`, default: 2)
+- 2 replicas in Docker Compose production config
+- Stateless — horizontally scalable
+
+### Queue-to-Handler Map
+
+| SQS Queue | Handler | AI Feature |
+|---|---|---|
+| `floorplan-analysis` | [floorplan-analysis.ts](file:///c:/Users/ayuvv/OneDrive/Documents/TatvaOps/tatvaops-vision/worker/src/handlers/floorplan-analysis.ts) | Gemini vision: parse floor plan image, detect rooms |
+| `moodboard-generation` | [moodboard-generation.ts](file:///c:/Users/ayuvv/OneDrive/Documents/TatvaOps/tatvaops-vision/worker/src/handlers/moodboard-generation.ts) | Gemini: generate per-room interior moodboard image |
+| `interior-view-generation` | Router → isometric or elevation | **NEW**: Full-floor isometric view (replaces per-wall elevation) |
+| `notification` | [notification.ts](file:///c:/Users/ayuvv/OneDrive/Documents/TatvaOps/tatvaops-vision/worker/src/handlers/notification.ts) | Email (SES), WhatsApp (MSG91), SMS |
+| `pdf-export` | [pdf-export.ts](file:///c:/Users/ayuvv/OneDrive/Documents/TatvaOps/tatvaops-vision/worker/src/handlers/pdf-export.ts) (~41KB) | Generate multi-page PDF design documents |
+| `component-update` | (placeholder — not yet active) | Component catalog update |
+
+> **Note**: The per-room wall elevation handler ([elevation-generation.ts](file:///c:/Users/ayuvv/OneDrive/Documents/TatvaOps/tatvaops-vision/worker/src/handlers/elevation-generation.ts)) is **deprecated** in favour of the full-floor isometric view ([interior-isometric-generation.ts](file:///c:/Users/ayuvv/OneDrive/Documents/TatvaOps/tatvaops-vision/worker/src/handlers/interior-isometric-generation.ts)).
+
+---
+
+## 6. AI Pipeline — Design Engine
+
+The `worker/src/design-engine/` directory is the core AI logic layer, cleanly separated from handlers. It exports reusable functions for all generation stages.
+
+### Stage-by-Stage Flow
+
+```mermaid
+flowchart LR
+    A["Floor Plan\n(PDF/Image)"] --> B["1. Floor Plan Analysis\n(Gemini Vision)"]
+    B --> C["Rooms Detected\n& Confirmed"]
+    C --> D["2. Intent Questionnaire\n(SENSE Layer)"]
+    D --> E["IntentGraph\n(Structured JSON)"]
+    E --> F["3. Spatial Planning\n(THINK Layer)"]
+    F --> G["SpatialPlan\n(Room + Component + Lighting)"]
+    C --> H["4. Moodboard Generation\n(per room, Gemini Imagen)"]
+    H --> I["5. Isometric Elevation\n(full floor, Gemini Imagen)"]
+    H --> J["6. Room 2D Views\n(5 views per room)"]
+    J --> K["7. Component Extraction\n(Gemini structured output)"]
+    I --> L["8. Walkthrough Video\n(Veo 3.1)"]
+    I --> M["9. PDF Export\n(PDFKit)"]
+```
+
+### Design Engine Modules
+
+| Module | Key Files | Purpose |
+|---|---|---|
+| `floorplan/` | `analyzer.ts`, `preprocessing.ts`, `prompts.ts`, `room-graph.ts` | PDF→image conversion, Gemini room detection, geometry graph |
+| `moodboard/` | `buildPrompt.ts`, `generateMoodboard.ts`, `intentMapper.ts`, `analyzeImage.ts` | Style intent → Gemini image prompt → moodboard |
+| `isometric/` | (multiple) | Full-floor isometric elevation — **source of truth** |
+| `elevation/` | (multiple) | **Deprecated** per-wall elevation |
+| `room-2d-views/` | (multiple) | Front/back/left/right/ceiling 2D views per room |
+| `walkthrough/` | `VeoClient`, `buildWalkthroughPrompt` | Veo 3.1 video generation |
+| `component-extraction/` | (multiple) | Gemini structured output: sofa, bed, table, etc. |
+| `sense/` | (multiple) | SENSE inference layer (intent understanding) |
+| `think/` | `spatial-plan.builder.ts`, etc. | THINK spatial reasoning layer |
+| `common/` | `gemini-client.ts` | Shared singleton Gemini client |
+
+---
+
+## 7. Database Schema (PostgreSQL via Prisma)
+
+### Core Models
+
+```mermaid
+erDiagram
+    User ||--o{ Project : owns
+    User ||--o| UserWallet : has
+    User ||--o{ Subscription : has
+    User ||--o{ Payment : makes
+    Project ||--o{ Room : contains
+    Project ||--o{ AIJob : triggers
+    Project ||--o{ IsometricFloorElevation : has
+    Project ||--o| IntentGraph : has
+    Project ||--o| SpatialPlan : has
+    Project ||--o{ ExportAsset : generates
+    Room ||--o{ RoomMoodboard : has
+    Room ||--o{ Room2DView : has
+    Room ||--o{ RoomComponentExtraction : has
+    Room ||--o{ RoomWalkthroughVideo : has
+    UserWallet ||--o{ CreditTransaction : ledger
+    Subscription }o--|| Plan : references
+```
+
+### Key Enums
+
+**`ProjectStage`** (workflow stages):
+`FLOOR_PLAN → INTENT → SPATIAL_PLANNING → MOODBOARD → ELEVATION → TWO_D_VIEWS → INTERIOR → COMPONENT → ROOM_WALKTHROUGH → EXPORT`
+
+**`AIJobType`** (job types processed by worker):
+`FLOORPLAN_ANALYSIS | MOODBOARD | INTERIOR_ISOMETRIC | TWO_D_VIEWS | COMPONENT_EXTRACTION | ROOM_WALKTHROUGH | PDF_EXPORT | SENSE_INFERENCE | SPATIAL_PLANNING`
+
+**`RoomType`** (18 types):
+`LIVING_ROOM | BEDROOM | KITCHEN | BATHROOM | DINING | TOILET | BALCONY | UTILITY | STORE | STUDY | PUJA | PASSAGE | STAIRCASE | LOBBY | FOYER | TERRACE | GARAGE | SERVANT_ROOM | DRESS | UNCLASSIFIED`
+
+---
+
+## 8. Pricing & Plan System
+
+Plans are defined as a **static catalog** in `backend/src/lib/plan-config.ts` (single source of truth).
+
+| Plan | Price (₹) | Projects | Rooms/Project | Regen Limit | Walkthroughs | Components | DPR | Guided |
+|---|---|---|---|---|---|---|---|---|
+| **Starter** | ₹3,499 | 1 | 7 | 1 | ❌ | ❌ | ❌ | ❌ |
+| **Standard** | ₹7,999 | 2 | 10 | 2 | ✅ 720p/1080p | Basic | ❌ | ❌ |
+| **Pro** | ₹14,999 | 3 | 15 | 3 | ✅ 1080p/2K | Standard | Basic | ✅ |
+| **Premium** | ₹29,999 | 5 | 20 | 5 | ✅ 4K | Advanced | Execution-grade | ✅ |
+
+> **Note**: Starter price in config shows ₹9 (test price) — must be updated to ₹3,499 before production.
+
+**Guardrails enforced by `plan-guardrails.ts`:**
+- Project count limit (per user)
+- Room count limit (per project, checked at floor plan analysis)
+- Regeneration limit (per stage, per project)
+- Feature access gating (pre-job creation)
+- Rate limits: 10 project creates/hr, 20 regenerations/hr, 50 jobs/hr
+
+**Payment flow**: Razorpay orders created server-side → webhook at `/api/webhooks/razorpay` → credits/subscription granted.
+
+---
+
+## 9. Auth & Identity
+
+- **Provider**: [Clerk](https://clerk.com) — handles sign-up, sign-in, JWTs, OAuth
+- **Admin Gate**: `adminAuthMiddleware` checks for `@tatvaops.com` email domain
+- **Internal Users**: `User.isInternal` flag + `internalRole` field; project-level plan override (`PlanSource.INTERNAL_OVERRIDE`) bypasses payment
+
+---
+
+## 10. Infrastructure (AWS — `ap-south-1`)
+
+| Resource | Details |
+|---|---|
+| **VPC** | `vpc-07cf1852608a103a4`, 3 public / 3 private / 3 DB subnets |
+| **ALB** | `tatvaops-vision-production-alb`, routes to App + Worker ASGs |
+| **Domain** | `vision.tatvaops.com`, ACM SSL certificate |
+| **RDS** | PostgreSQL 15, Multi-AZ, 7-day backup |
+| **ElastiCache** | Redis 7 |
+| **S3 Buckets** | `floorplans`, `moodboards`, `renders`, `exports` |
+| **SQS** | 6 queues + 6 DLQs |
+| **CloudWatch** | Structured logs from backend + worker |
+| **Bastion** | `13.204.4.41` |
+| **IaC** | Terraform (13 `.tf` files) |
+| **CI/CD** | AWS CodeDeploy + optional GitHub Actions |
+
+---
+
+## 11. Notifications
+
+Three channels, all tracked in `NotificationLog`:
+
+| Channel | Provider | Events |
+|---|---|---|
+| **Email** | AWS SES | Job started/completed/failed, export ready, payment, credits low, welcome |
+| **WhatsApp** | MSG91 | Same events |
+| **SMS** | MSG91 | Same events |
+
+---
+
+## 12. Observations & Recommendations
+
+### ✅ Strengths
+- **Well-structured modular architecture** — clear separation between API, worker, and design engine
+- **Plan guardrails are comprehensive** — feature gating, regeneration limits, rate limiting all enforced server-side
+- **Design engine as a library** — `design-engine/` is cleanly decoupled from the worker entry point, making it testable and reusable
+- **Credit ledger** — finance-grade accounting with idempotency keys and reversal support
+- **Redis progress state** — used for real-time polling during AI jobs
+- **Isometric migration** — architectural decision to replace per-wall elevations with a single full-floor view is a good simplification
+
+### ⚠️ Issues / Risks
+
+| Area | Issue | Severity |
+|---|---|---|
+| **Plan price** | `STARTER` price in `plan-config.ts` is `900` paise (₹9) — **test value still in code** | 🔴 High |
+| **Deprecated code** | `RoomElevation` model and `elevation-generation.ts` handler still present and active in router | 🟡 Medium |
+| **Worker placeholder** | `component-update` queue handler is a placeholder (`TODO`) — jobs sent to it are silently dropped | 🟡 Medium |
+| **No test suite** | No visible `*.test.ts` or `*.spec.ts` files in any service | 🟡 Medium |
+| **API keys in documents** | `DEPLOYMENT_SUMMARY.md` contains plaintext Razorpay live keys and Google Maps API keys | 🔴 High |
+| **BullMQ vs SQS** | Backend has BullMQ as a dependency but worker uses raw SQS polling — architectural inconsistency | 🟡 Medium |
+| **Component-update queue** | Registered in worker startup but has no active handler | 🟡 Medium |
+| **`pdf-export.ts` size** | 40,970 bytes — very large single file, consider splitting | 🟢 Low |
+| **Legacy models** | `UsageCredit`, `CreditLedger`, `User.credits` still in schema but deprecated | 🟢 Low |
+| **SENSE/THINK layers** | `SPATIAL_PLANNING` stage and `SpatialPlan` model exist but the queue is not registered in the worker startup | 🟡 Medium |
+
+### 💡 Recommendations
+
+1. **Rotate leaked API keys immediately** — Razorpay live keys and Google Maps key are visible in `DEPLOYMENT_SUMMARY.md`
+2. **Fix Starter plan price** — Change `priceInr: 900` → `349900` (₹3,499) in `plan-config.ts`
+3. **Implement component-update handler** — The queue is registered in worker startup but has no real handler
+4. **Register SENSE/THINK queues in worker** — `sense-inference.ts` exists as a handler but the queue is not in the worker startup list
+5. **Add a test suite** — Even basic integration tests for the guardrail logic and design engine would significantly reduce regression risk
+6. **Clean up deprecated models** — `RoomElevation`, `UsageCredit`, `CreditLedger` can be migrated and removed in a future migration
+7. **Consolidate BullMQ vs SQS** — If SQS is the standard, remove the BullMQ dependency from backend; if BullMQ is needed for in-process queuing, document the intent
+
+---
+
+## 13. Data Flow — Core User Journey
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant FE as Frontend
+    participant BE as Backend
+    participant SQS as AWS SQS
+    participant W as Worker
+    participant G as Gemini AI
+    participant S3 as S3
+
+    U->>FE: Upload floor plan PDF
+    FE->>BE: POST /api/uploads (get presigned URL)
+    FE->>S3: Direct upload
+    FE->>BE: POST /api/projects (create project + queue job)
+    BE->>SQS: Send to floorplan-analysis queue
+    BE->>FE: Job ID + status QUEUED
+
+    loop Poll every 2s
+        FE->>BE: GET /api/jobs/:id
+    end
+
+    W->>SQS: Long poll, receive message
+    W->>S3: Download floor plan
+    W->>G: Gemini analysis (detect rooms)
+    W->>S3: Store annotated result
+    W->>BE (DB): Update AIJob status = COMPLETED
+
+    FE->>BE: Job COMPLETED → fetch rooms
+    U->>FE: Confirm rooms, select styles
+    FE->>BE: POST /api/jobs (moodboard-generation)
+    BE->>SQS: Send to moodboard-generation queue
+    ... (same polling loop) ...
+    W->>G: Gemini Imagen (generate moodboard)
+    W->>S3: Store moodboard image
+```
+
+---
+
+*Generated by Antigravity — TatvaOps Vision Platform Analysis*

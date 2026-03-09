@@ -1,0 +1,1169 @@
+// Prisma Schema for TatvaOps Vision
+// Database: PostgreSQL
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USER & AUTHENTICATION
+// ============================================
+
+model User {
+  id        String   @id @default(uuid())
+  clerkId   String   @unique
+  email     String   @unique
+  name      String?
+  avatarUrl String?
+  plan      UserPlan @default(FREE)
+  credits   Int      @default(50) // @deprecated - Use UserWallet.balance instead
+
+  // Internal employee fields (NEW)
+  isInternal   Boolean @default(false)
+  internalRole String? // "tatvaops_employee", "admin", etc.
+
+  // Profile details
+  phone      String?
+  bio        String?
+  location   String?
+  website    String?
+  company    String?
+  occupation String?
+  onboarded  Boolean @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  projects      Project[]
+  subscriptions Subscription[]
+  transactions  Transaction[]
+  wallet        UserWallet?
+  payments      Payment[]
+
+  @@index([clerkId])
+  @@index([email])
+  @@index([isInternal])
+}
+
+enum UserPlan {
+  FREE
+  STARTER
+  STANDARD // NEW: Replaces PROFESSIONAL
+  PRO      // NEW: Premium tier
+  PREMIUM  // NEW: Highest tier
+  PROFESSIONAL // @deprecated
+  ENTERPRISE   // @deprecated
+  NEW_YEAR_UNLIMITED_2025 // @deprecated
+}
+
+// ============================================
+// PROJECT & ROOMS
+// ============================================
+
+model Project {
+  id           String       @id @default(uuid())
+  userId       String
+  name         String
+  currentStage ProjectStage @default(FLOOR_PLAN)
+  floorPlanUrl String?
+
+  // Project-level plan (NEW: for internal users + future project-specific plans)
+  planCode   String?     // STARTER, STANDARD, PRO, PREMIUM
+  planSource PlanSource? // PAID, INTERNAL_OVERRIDE
+
+  // Project metadata (floor plan analysis, design preferences, etc.)
+  metadata Json? // {
+  //   floorPlanAnalysis: { analyzedAt, analysisVersion, overallConfidence, roomCount, warnings, imageMetadata },
+  //   designIntent: { ... },
+  //   exportSettings: { ... }
+  // }
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  user                User                      @relation(fields: [userId], references: [id])
+  rooms               Room[]
+  versions            ProjectVersion[]
+  aiJobs              AIJob[]
+  isometricElevations IsometricFloorElevation[]
+  intentGraph         IntentGraph?
+  spatialPlan         SpatialPlan? // NEW: 3D Walkthrough spatial plan
+
+  @@index([userId])
+  @@index([userId, deletedAt])
+  @@index([planCode])
+  @@index([planSource])
+}
+
+enum PlanSource {
+  PAID              // User purchased via Razorpay
+  INTERNAL_OVERRIDE // TatvaOps employee, no payment
+}
+
+enum ProjectStage {
+  FLOOR_PLAN
+  INTENT
+  SPATIAL_PLANNING // NEW: 3D Walkthrough - Spatial reasoning stage
+  MOODBOARD
+  ELEVATION
+  TWO_D_VIEWS
+  INTERIOR
+  COMPONENT
+  ROOM_WALKTHROUGH
+  EXPORT
+}
+
+model ProjectVersion {
+  id        String       @id @default(uuid())
+  projectId String
+  stage     ProjectStage
+  version   Int
+  snapshot  Json
+
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@unique([projectId, stage, version])
+  @@index([projectId])
+}
+
+model Room {
+  id        String     @id @default(uuid())
+  projectId String
+  name      String
+  type      RoomType
+  geometry  Json // RoomGeometry: boundingBox, polygon, centroid
+  status    RoomStatus @default(PENDING)
+
+  // Floor plan analysis fields
+  confidence Float? // AI detection confidence (0-1)
+  metadata   Json? // Additional detection metadata:
+  // - symbolsDetected, textDetected, reasoning
+  // - areaEstimate, areaUnit, adjacentRooms
+  // - detectionSource, analysisVersion
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project       Project            @relation(fields: [projectId], references: [id])
+  moodboards    RoomMoodboard[]
+  elevations    RoomElevation[]
+  twoDViews     Room2DView[]
+  componentExtractions RoomComponentExtraction[]
+  walkthroughVideos    RoomWalkthroughVideo[]
+  interiorViews RoomInteriorView[]
+  components    RoomComponent[]
+
+  @@index([projectId])
+  @@index([projectId, status])
+}
+
+enum RoomType {
+  LIVING_ROOM
+  BEDROOM
+  KITCHEN
+  BATHROOM
+  DINING
+  TOILET // Separate WC
+  BALCONY
+  UTILITY // Laundry, wash area
+  STORE // Storage room
+  STUDY // Home office
+  PUJA // Prayer room
+  PASSAGE // Corridor, hallway
+  STAIRCASE
+  LOBBY
+  FOYER // Entry area
+  TERRACE
+  GARAGE
+  SERVANT_ROOM
+  DRESS // Dressing room / walk-in closet
+  UNCLASSIFIED // AI couldn't determine type - NEVER skip a room
+}
+
+enum RoomStatus {
+  PENDING // Detected by AI, awaiting human confirmation
+  CONFIRMED // User confirmed the room
+  LOCKED // Locked for subsequent processing
+  REJECTED // User rejected (false positive)
+}
+
+// ============================================
+// INTENT GRAPH (3D WALKTHROUGH - SENSE LAYER)
+// ============================================
+
+model IntentGraph {
+  id            String   @id @default(uuid())
+  projectId     String   @unique
+  userId        String
+
+  // Raw input references (images, text, hints)
+  inputs        Json     // { images: [...], floorPlan: "...", moodboards: [...], text: "...", hints: {...} }
+  
+  // AI-inferred structured data
+  inferred      Json     // InferredIntent: { spaceType, styleSignals, componentPreferences, changeBoundaries, lifestyleSignals, confidence, inferredFrom }
+  
+  // Constraints (what must not change)
+  constraints   Json     // { preserve: [...], mustChange: [...] }
+  
+  // Prioritization weights
+  priorities    Json     // { style: 0.8, cost: 0.3, speed: 0.5, ... }
+  
+  // Metadata
+  confidence    Float    @default(0.0)
+  version       Int      @default(1)
+  inputHash     String?  @unique  // SHA256 hash for deduplication
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  project       Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  spatialPlans  SpatialPlan[] // NEW: Spatial plans derived from this intent
+  
+  @@index([userId])
+  @@index([inputHash])
+  @@index([projectId])
+  @@index([createdAt])
+}
+
+// ============================================
+// SPATIAL PLAN (3D WALKTHROUGH - THINK LAYER)
+// ============================================
+
+model SpatialPlan {
+  id            String   @id @default(uuid())
+  projectId     String   @unique
+  intentGraphId String
+  userId        String
+  
+  // Core spatial planning outputs (structured JSON)
+  roomPlans     Json     // Room-wise spatial logic
+  componentPlan Json     // Component placement rules
+  lightingPlan  Json     // Lighting strategy
+  walkthrough   Json     // Camera path planning
+  constraints   Json     // What must/must not change
+  
+  // Metadata
+  readiness     Float    @default(0.0)  // Confidence score (0-1)
+  version       Int      @default(1)
+  inputHash     String?  @unique        // For deduplication
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  project       Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  intentGraph   IntentGraph @relation(fields: [intentGraphId], references: [id])
+  
+  @@index([userId])
+  @@index([projectId])
+  @@index([intentGraphId])
+  @@index([inputHash])
+  @@index([createdAt])
+}
+
+// ============================================
+// DESIGN ASSETS
+// ============================================
+
+model RoomMoodboard {
+  id           String   @id @default(uuid())
+  roomId       String
+  imageUrl     String
+  s3Key        String? // S3 storage key
+  style        String
+  colorPalette String[]
+  version      Int      @default(1)
+
+  // Generation metadata
+  promptHash String? // For deduplication
+  jobId      String? // Link to AI job
+  metadata   Json? // Additional generation info
+
+  createdAt DateTime @default(now())
+
+  room Room @relation(fields: [roomId], references: [id])
+
+  @@unique([roomId, version]) // One moodboard per room per version
+  @@index([roomId])
+  @@index([jobId])
+}
+
+// @deprecated - Use IsometricFloorElevation instead
+// This model is kept for backward compatibility only
+model RoomElevation {
+  id       String @id @default(uuid())
+  roomId   String
+  wall     String // NORTH, SOUTH, EAST, WEST
+  imageUrl String
+  version  Int    @default(1)
+
+  // S3 storage
+  s3Key String?
+
+  // Generation metadata (for deduplication and tracking)
+  geometryHash      String? // Hash of wall geometry used
+  styleHash         String? // Hash of style applied
+  deviationEstimate Float? // Estimated deviation from target (0-1)
+  jobId             String? // Link to AI job
+
+  // Additional metadata
+  metadata Json? // Additional generation info
+
+  createdAt DateTime @default(now())
+
+  room Room @relation(fields: [roomId], references: [id])
+
+  @@unique([roomId, wall, version]) // One elevation per room per wall per version
+  @@index([roomId])
+  @@index([jobId])
+}
+
+enum Room2DViewType {
+  BIRD_VIEW
+  FRONT_WALL
+  BACK_WALL
+  LEFT_WALL
+  RIGHT_WALL
+  CEILING_VIEW
+}
+
+model Room2DView {
+  id       String @id @default(uuid())
+  roomId   String
+  viewType Room2DViewType
+  imageUrl String
+  version  Int    @default(1)
+
+  // S3 storage
+  s3Key String?
+
+  // Generation metadata
+  geometryHash String?
+  styleHash    String?
+  jobId        String?
+  metadata     Json?
+
+  createdAt DateTime @default(now())
+
+  room Room @relation(fields: [roomId], references: [id])
+
+  @@unique([roomId, viewType, version])
+  @@index([roomId])
+  @@index([jobId])
+}
+
+model RoomComponentExtraction {
+  id      String @id @default(uuid())
+  roomId  String
+  version Int    @default(1)
+  data    Json
+
+  // S3 storage
+  s3Key String?
+
+  // Job tracking
+  jobId String?
+
+  createdAt DateTime @default(now())
+
+  room Room @relation(fields: [roomId], references: [id])
+
+  @@unique([roomId, version])
+  @@index([roomId])
+  @@index([jobId])
+}
+
+model RoomWalkthroughVideo {
+  id         String @id @default(uuid())
+  roomId     String
+  videoUrl   String
+  s3Key      String
+  resolution String
+  duration   Int    @default(8)
+  version    Int    @default(1)
+
+  // Source references
+  moodboardId String?
+  elevationId String?
+  twoDViewIds Json?
+
+  // Generation metadata
+  jobId            String?
+  modelVersion     String @default("veo-3.1")
+  generationTimeMs Int?
+
+  createdAt DateTime @default(now())
+
+  room Room @relation(fields: [roomId], references: [id])
+
+  @@unique([roomId, version])
+  @@index([roomId])
+  @@index([jobId])
+}
+
+// ============================================
+// ISOMETRIC FLOOR ELEVATION (NEW SOURCE OF TRUTH)
+// ============================================
+// Full-floor isometric / bird's-eye interior elevation
+// One image per floor - replaces room-wise elevations
+model IsometricFloorElevation {
+  id        String @id @default(uuid())
+  projectId String
+  floor     Int    @default(1) // Floor number (1-indexed)
+  imageUrl  String
+  version   Int    @default(1)
+
+  // S3 storage
+  s3Key String?
+
+  // Geometry validation
+  geometryHash          String? // Hash of floor plan geometry used
+  styleHash             String? // Hash of all room moodboards combined
+  roomCount             Int? // Number of rooms in this elevation
+  deviationEstimate     Float? // Estimated geometric deviation from target (0-1, must be ≤ 0.05)
+  architecturalAccuracy Float? // How similar the elevation is to floor plan (0-1, 1.0 = perfect match)
+
+  // Job tracking
+  jobId String? // Link to AI job
+
+  // Metadata
+  metadata Json? // Generation info: camera angle, room styles applied, etc.
+
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@unique([projectId, floor, version])
+  @@index([projectId])
+  @@index([jobId])
+}
+
+model RoomInteriorView {
+  id        String @id @default(uuid())
+  roomId    String
+  imageUrl  String
+  viewAngle Int
+  version   Int    @default(1)
+
+  createdAt DateTime @default(now())
+
+  room Room @relation(fields: [roomId], references: [id])
+
+  @@index([roomId])
+}
+
+model RoomComponent {
+  id            String        @id @default(uuid())
+  roomId        String
+  componentType ComponentType
+  style         String
+  size          ComponentSize
+  material      String
+  position      Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  room Room @relation(fields: [roomId], references: [id])
+
+  @@index([roomId])
+}
+
+enum ComponentType {
+  SOFA
+  TV
+  BED
+  TABLE
+  LIGHT
+  CHAIR
+  CABINET
+  RUG
+  PLANT
+  ART
+}
+
+enum ComponentSize {
+  S
+  M
+  L
+  XL
+}
+
+// ============================================
+// AI JOBS (Enhanced for SQS integration)
+// ============================================
+
+model AIJob {
+  id         String      @id @default(uuid())
+  projectId  String
+  userId     String // Denormalized for faster queries
+  type       AIJobType
+  status     AIJobStatus @default(QUEUED)
+  payload    Json
+  result     Json?
+  retryCount Int         @default(0)
+  maxRetries Int         @default(3)
+  error      String?
+
+  // SQS integration fields
+  sqsMessageId     String? @unique
+  sqsReceiptHandle String?
+
+  // Cost tracking
+  creditsUsed      Int  @default(0)
+  processingTimeMs Int?
+
+  // Prompt versioning
+  promptVersion String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+  @@index([userId])
+  @@index([status])
+  @@index([type, status])
+  @@index([sqsMessageId])
+}
+
+// ============================================
+// EXPORT ASSETS (PDF exports, design packages)
+// ============================================
+
+model ExportAsset {
+  id        String            @id @default(uuid())
+  projectId String
+  userId    String
+  type      ExportAssetType
+  status    ExportAssetStatus @default(PENDING)
+
+  // S3 storage
+  s3Key       String?
+  s3Bucket    String?
+  filename    String?
+  contentType String?
+  fileSize    Int?
+
+  // Job tracking
+  jobId String? @unique // Link to AI job
+
+  // Metadata
+  metadata Json? // Additional info: pages, room count, version, etc.
+
+  // Error handling
+  error String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([projectId])
+  @@index([userId])
+  @@index([status])
+  @@index([type])
+}
+
+enum ExportAssetType {
+  MOODBOARD_PDF
+  ELEVATION_PDF
+  FULL_DESIGN_PDF
+}
+
+enum ExportAssetStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// ============================================
+// ASSET VERSIONS (Track all generated assets)
+// ============================================
+
+model AssetVersion {
+  id        String    @id @default(uuid())
+  projectId String
+  roomId    String?
+  assetType AssetType
+  version   Int       @default(1)
+
+  // S3 storage
+  s3Bucket    String
+  s3Key       String
+  contentType String
+  fileSize    Int?
+
+  // Metadata
+  metadata Json?
+
+  // Lifecycle
+  isLatest  Boolean   @default(true)
+  expiresAt DateTime? // For temp assets
+
+  createdAt DateTime @default(now())
+  createdBy String // User ID
+
+  @@unique([projectId, roomId, assetType, version])
+  @@index([projectId])
+  @@index([roomId])
+  @@index([assetType])
+  @@index([isLatest])
+}
+
+enum AssetType {
+  FLOORPLAN_ORIGINAL
+  FLOORPLAN_ANALYZED
+  MOODBOARD
+  ELEVATION
+  INTERIOR_VIEW
+  COMPONENT_RENDER
+  EXPORT_PACKAGE
+}
+
+enum AIJobType {
+  FLOORPLAN_ANALYSIS
+  MOODBOARD
+  ELEVATION // @deprecated - Use INTERIOR_ISOMETRIC instead
+  TWO_D_VIEWS
+  COMPONENT_EXTRACTION
+  ROOM_WALKTHROUGH
+  INTERIOR
+  COMPONENT_UPDATE
+  INTERIOR_ISOMETRIC // NEW: Full-floor isometric elevation (single source of truth)
+  PDF_EXPORT // NEW: Generate design PDF documents
+  SENSE_INFERENCE // NEW: 3D Walkthrough - Intent Graph inference
+  SPATIAL_PLANNING // NEW: 3D Walkthrough - Spatial reasoning
+}
+
+enum AIJobStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// ============================================
+// PAYMENTS & SUBSCRIPTIONS
+// ============================================
+
+model Subscription {
+  id            String           @id @default(uuid())
+  userId        String
+  planId        String?
+  planCode      String           // STARTER, STANDARD, PRO, PREMIUM (denormalized for speed)
+  
+  // Status
+  status        SubscriptionStatus @default(ACTIVE)
+  
+  // Validity
+  startDate     DateTime         @default(now())
+  endDate       DateTime         // When plan expires
+  
+  // Payment reference (NEW: for plan purchases)
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+  
+  // Legacy fields (OLD: for recurring subscriptions)
+  razorpaySubscriptionId String?
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  planMetadata Json? // @deprecated - use Plan model instead
+  plan         UserPlan? // @deprecated - use planCode instead
+  
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  cancelledAt   DateTime?
+  
+  user          User             @relation(fields: [userId], references: [id])
+  planRef       Plan?            @relation("subscriptions", fields: [planId], references: [id])
+  
+  @@index([userId])
+  @@index([planCode])
+  @@index([status])
+  @@index([userId, status])
+  @@index([razorpaySubscriptionId])
+  @@index([razorpayOrderId])
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAUSED     // Legacy
+  CANCELLED
+  EXPIRED
+}
+
+// ============================================
+// REGENERATION LOG (Track regenerations per stage)
+// ============================================
+
+model RegenerationLog {
+  id        String       @id @default(uuid())
+  userId    String
+  projectId String
+  stage     ProjectStage // MOODBOARD, ELEVATION, INTERIOR, etc.
+  count     Int          @default(0) // Number of regenerations for this stage
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, projectId, stage])
+  @@index([userId])
+  @@index([projectId])
+  @@index([userId, projectId])
+}
+
+model Transaction {
+  id                String            @id @default(uuid())
+  userId            String
+  type              TransactionType
+  amount            Int // Amount in smallest currency unit (paise)
+  currency          String            @default("INR")
+  status            TransactionStatus @default(PENDING)
+  razorpayPaymentId String?
+  metadata          Json?
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([razorpayPaymentId])
+}
+
+enum TransactionType {
+  SUBSCRIPTION
+  CREDITS
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+// ============================================
+// USER WALLET (Production Credit System)
+// ============================================
+
+model UserWallet {
+  id           String  @id @default(uuid())
+  userId       String  @unique
+  balance      Int     @default(0)  // Main credit balance
+  graceBalance Int     @default(0)  // Temporary overdraft credits (auto-applied once)
+  softLimitHit Boolean @default(false) // True when user warned about low balance
+
+  // Lifetime tracking
+  totalEarned Int @default(0)
+  totalSpent  Int @default(0)
+
+  // Abuse detection
+  lastAbuseCheck DateTime?
+  abuseFlags     Json?     // { regenCount, lastRegenAt, throttledUntil }
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user         User                @relation(fields: [userId], references: [id])
+  transactions CreditTransaction[]
+
+  @@index([userId])
+}
+
+// ============================================
+// CREDIT TRANSACTION LEDGER (Finance-Grade)
+// ============================================
+
+model CreditTransaction {
+  id           String @id @default(uuid())
+  userId       String
+  walletId     String
+
+  // Transaction details
+  amount       Int    // +credit / -debit (negative for debits)
+  balanceAfter Int    // Balance after this transaction
+
+  type   CreditTransactionType
+  status CreditTransactionStatus @default(SUCCESS)
+
+  // Resource reference (what was this credit used for)
+  resourceType CreditResourceType?
+  resourceId   String?
+
+  // AI Job tracking
+  jobId        String?
+  jobType      String?
+
+  // Gemini cost tracking (for auto-pricing)
+  geminiInputTokens  Int?
+  geminiOutputTokens Int?
+  geminiCostUsd      Float?
+
+  // Metadata
+  metadata    Json?
+  description String?
+
+  // Idempotency
+  idempotencyKey String? @unique
+
+  createdAt DateTime @default(now())
+
+  wallet UserWallet @relation(fields: [walletId], references: [id])
+
+  @@index([userId])
+  @@index([walletId])
+  @@index([type])
+  @@index([status])
+  @@index([resourceType, resourceId])
+  @@index([jobId])
+  @@index([createdAt])
+}
+
+enum CreditTransactionType {
+  PURCHASE           // User bought credits
+  SUBSCRIPTION_GRANT // Credits from subscription
+  GENERATION         // First-time AI generation
+  REGENERATION       // Retry/regeneration (lower cost)
+  REFUND             // Credits returned (failed job, etc.)
+  GRACE              // Grace credits (overdraft)
+  WELCOME            // First-time signup bonus
+  PROMOTIONAL        // Marketing/coupon credits
+  SYSTEM_ADJUSTMENT  // Admin adjustment
+  REVERSAL           // Reversing a previous transaction
+}
+
+enum CreditTransactionStatus {
+  SUCCESS
+  FAILED
+  PENDING
+  REVERSED
+}
+
+enum CreditResourceType {
+  PROJECT
+  ROOM
+  FLOORPLAN
+  MOODBOARD
+  ELEVATION
+  ISOMETRIC
+}
+
+// ============================================
+// PAYMENTS (Razorpay Integration)
+// ============================================
+
+model Payment {
+  id     String @id @default(uuid())
+  userId String
+
+  // Razorpay details
+  provider          String  @default("razorpay")
+  razorpayPaymentId String? @unique
+  razorpayOrderId   String?
+  razorpaySignature String?
+
+  // Amount details
+  amount   Int    // Amount in smallest currency unit (paise)
+  currency String @default("INR")
+  credits  Int    // Credits to be granted
+
+  // Status
+  status PaymentStatus @default(PENDING)
+
+  // Invoice
+  invoiceId  String?
+  invoiceUrl String?
+
+  // Metadata
+  metadata Json? // { plan, packType, couponCode, etc. }
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+  failedAt    DateTime?
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([razorpayPaymentId])
+  @@index([razorpayOrderId])
+  @@index([status])
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REFUNDED
+  CANCELLED
+}
+
+// ============================================
+// CREDIT PACKS (Purchasable Credit Bundles)
+// ============================================
+
+model CreditPack {
+  id               String     @id @default(uuid())
+  name             String
+  description      String?
+  credits          Int        // Number of credits in pack
+  priceInr         Int        // Price in paise (e.g., 49900 = ₹499)
+  isActive         Boolean    @default(true) // @deprecated - use status instead
+  isPopular        Boolean    @default(false) // Highlight in UI
+  sortOrder        Int        @default(0)
+  
+  // NEW: Deprecation fields
+  status           PlanStatus @default(ACTIVE)
+  purchasable      Boolean    @default(true)
+  visible          Boolean    @default(true)
+
+  // Validity
+  validityDays Int? // Credits expire after X days (null = never)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum PlanStatus {
+  ACTIVE
+  DEPRECATED
+}
+
+// ============================================
+// NEW PLAN SYSTEM (Replaces Credit Packs)
+// ============================================
+
+model Plan {
+  id                   String     @id @default(uuid())
+  code                 String     @unique // STARTER, STANDARD, PRO, PREMIUM
+  name                 String     // Display name
+  priceInr             Int        // Price in paise
+  
+  // Project & Room Limits
+  maxProjects          Int
+  maxRoomsPerProject   Int
+  regenerationLimit    Int        // Per-stage regeneration limit
+  
+  // Feature flags (JSON for flexibility)
+  features             Json       // { moodboard_generation, room_2d_views, floor_3d_elevation, per_room_3d_elevation, room_walkthroughs, component_extractor, dpr, guided_assistance }
+  
+  // Walkthrough quality
+  walkthroughQuality   String?    // "720p/1080p", "1080p/2K", "4K", etc.
+  
+  // Component extractor level
+  componentExtractor   String?    // "basic", "standard", "advanced"
+  
+  // DPR level  
+  dpr                  String?    // "basic", "execution-grade"
+  
+  // Guided assistance
+  guidedAssistance     Boolean    @default(false)
+  
+  // Special benefits (JSON)
+  benefit              Json?      // { fee_refunded_or_adjusted_if_execution_with_tatvaops: true }
+  
+  // Status & visibility
+  status               PlanStatus @default(ACTIVE)
+  purchasable          Boolean    @default(true)
+  visible              Boolean    @default(true)
+  sortOrder            Int        @default(0)
+  
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+  
+  subscriptions        Subscription[] @relation("subscriptions")
+  
+  @@index([code])
+  @@index([status])
+}
+
+// ============================================
+// ANALYTICS EVENTS (Credit Usage Tracking)
+// ============================================
+
+model CreditAnalyticsEvent {
+  id     String @id @default(uuid())
+  userId String
+
+  // Event details
+  eventType String // credit_used, credit_purchased, warning_shown, etc.
+  eventData Json?  // Feature-specific data
+
+  // Aggregation helpers
+  creditsAmount Int?
+  featureType   String? // moodboard, isometric, floorplan, etc.
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([eventType])
+  @@index([featureType])
+  @@index([createdAt])
+}
+
+// ============================================
+// INVOICES (Monthly Billing)
+// ============================================
+
+model Invoice {
+  id     String @id @default(uuid())
+  userId String
+
+  // Invoice details
+  invoiceNumber String @unique
+  month         Int    // 1-12
+  year          Int
+
+  // Amounts
+  totalCreditsUsed Int
+  totalAmountInr   Int // Amount in paise
+
+  // Status
+  status InvoiceStatus @default(DRAFT)
+
+  // PDF
+  pdfUrl String?
+
+  // Period
+  periodStart DateTime
+  periodEnd   DateTime
+
+  createdAt   DateTime  @default(now())
+  generatedAt DateTime?
+
+  @@unique([userId, month, year])
+  @@index([userId])
+  @@index([status])
+}
+
+enum InvoiceStatus {
+  DRAFT
+  GENERATED
+  SENT
+  PAID
+}
+
+// ============================================
+// LEGACY CREDIT MODELS (Keep for migration)
+// @deprecated - Use UserWallet + CreditTransaction
+// ============================================
+
+model UsageCredit {
+  id     String @id @default(uuid())
+  userId String
+
+  // Current balance
+  balance Int @default(0)
+
+  // Tracking
+  totalEarned Int @default(0)
+  totalSpent  Int @default(0)
+
+  lastUpdated DateTime @default(now())
+
+  // Relations
+  ledger CreditLedger[]
+
+  @@unique([userId])
+  @@index([userId])
+}
+
+model CreditLedger {
+  id            String @id @default(uuid())
+  usageCreditId String
+
+  // Transaction details
+  amount       Int // Positive for credit, negative for debit
+  balanceAfter Int
+  type         CreditType
+
+  // Reference
+  referenceType String? // 'ai_job', 'subscription', 'purchase'
+  referenceId   String?
+
+  description String?
+
+  createdAt DateTime @default(now())
+
+  usageCredit UsageCredit @relation(fields: [usageCreditId], references: [id])
+
+  @@index([usageCreditId])
+  @@index([createdAt])
+}
+
+enum CreditType {
+  PURCHASE
+  SUBSCRIPTION_GRANT
+  AI_JOB_DEBIT
+  REFUND
+  ADMIN_ADJUSTMENT
+  PROMOTIONAL
+}
+
+// ============================================
+// NOTIFICATIONS (Tracking sent notifications)
+// ============================================
+
+model NotificationLog {
+  id     String @id @default(uuid())
+  userId String
+
+  channel NotificationChannel
+  type    NotificationType
+
+  // Delivery details
+  recipient  String // Email or phone
+  templateId String?
+  payload    Json?
+
+  // Status tracking
+  status     NotificationStatus @default(PENDING)
+  externalId String? // MSG91 or SES message ID
+  error      String?
+
+  sentAt      DateTime?
+  deliveredAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([status])
+  @@index([channel, status])
+}
+
+enum NotificationChannel {
+  EMAIL
+  WHATSAPP
+  SMS
+}
+
+enum NotificationType {
+  JOB_STARTED
+  JOB_COMPLETED
+  JOB_FAILED
+  EXPORT_READY
+  PAYMENT_SUCCESS
+  PAYMENT_FAILED
+  CREDITS_LOW
+  WELCOME
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+}

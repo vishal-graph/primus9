@@ -1,0 +1,38 @@
+# Primus9 — Render Blueprint
+# Deploys API server + BullMQ background worker from the same Dockerfile
+
+services:
+  # ── Express API Server ──
+  - type: web
+    name: primus9-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    region: singapore
+    plan: starter
+    healthCheckPath: /health
+    numInstances: 1
+    branch: release
+    envVars:
+      - key: MODE
+        value: api
+      - key: PORT
+        value: "4000"
+      - key: NODE_ENV
+        value: production
+
+  # ── BullMQ Background Worker ──
+  - type: worker
+    name: primus9-worker
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    region: singapore
+    plan: starter
+    numInstances: 1
+    branch: release
+    envVars:
+      - key: MODE
+        value: worker
+      - key: NODE_ENV
+        value: production

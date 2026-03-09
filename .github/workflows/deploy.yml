@@ -1,0 +1,305 @@
+name: Deploy to EC2 via CodeDeploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Deploy target'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - application
+          - worker
+
+env:
+  AWS_REGION: ap-south-1
+  CODEDEPLOY_APP: tatvaops-vision-production-app
+  S3_BUCKET: tatvaops-vision-codedeploy-018858881354
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install and lint backend
+        working-directory: ./backend
+        run: |
+          npm ci
+          npm run lint || true
+
+      - name: Install and lint frontend
+        working-directory: ./frontend
+        run: |
+          npm ci
+          npm run lint || true
+
+  deploy:
+    name: Deploy via CodeDeploy
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create deployment package
+        run: |
+          DEPLOYMENT_ID=$(date +%Y%m%d%H%M%S)-$(echo $GITHUB_SHA | cut -c1-7)
+          echo "DEPLOYMENT_ID=$DEPLOYMENT_ID" >> $GITHUB_ENV
+          
+          # Create zip excluding unnecessary files
+          zip -r deployment-$DEPLOYMENT_ID.zip . \
+            -x "*.git*" \
+            -x "node_modules/*" \
+            -x ".next/*" \
+            -x "dist/*" \
+            -x "*.log" \
+            -x "infrastructure/terraform/*" \
+            -x "*.tfstate*" \
+            -x "*.pem"
+          
+          echo "Created: deployment-$DEPLOYMENT_ID.zip"
+          ls -la deployment-$DEPLOYMENT_ID.zip
+
+      - name: Upload to S3
+        run: |
+          aws s3 cp deployment-${{ env.DEPLOYMENT_ID }}.zip \
+            s3://${{ env.S3_BUCKET }}/deployments/deployment-${{ env.DEPLOYMENT_ID }}.zip
+          
+          echo "✅ Uploaded to S3"
+
+      - name: Deploy to Application Servers
+        if: ${{ github.event.inputs.target == 'all' || github.event.inputs.target == 'application' || github.event.inputs.target == '' }}
+        run: |
+          echo "🚀 Deploying to Application servers..."
+          
+          APP_DEPLOYMENT=$(aws deploy create-deployment \
+            --application-name ${{ env.CODEDEPLOY_APP }} \
+            --deployment-group-name application \
+            --s3-location bucket=${{ env.S3_BUCKET }},key=deployments/deployment-${{ env.DEPLOYMENT_ID }}.zip,bundleType=zip \
+            --description "GitHub Actions: ${{ env.DEPLOYMENT_ID }}" \
+            --query 'deploymentId' \
+            --output text)
+          
+          echo "APP_DEPLOYMENT=$APP_DEPLOYMENT" >> $GITHUB_ENV
+          echo "Started deployment: $APP_DEPLOYMENT"
+
+      - name: Deploy to Worker Servers
+        if: ${{ github.event.inputs.target == 'all' || github.event.inputs.target == 'worker' || github.event.inputs.target == '' }}
+        run: |
+          echo "🚀 Deploying to Worker servers..."
+          
+          WORKER_DEPLOYMENT=$(aws deploy create-deployment \
+            --application-name ${{ env.CODEDEPLOY_APP }} \
+            --deployment-group-name worker \
+            --s3-location bucket=${{ env.S3_BUCKET }},key=deployments/deployment-${{ env.DEPLOYMENT_ID }}.zip,bundleType=zip \
+            --description "GitHub Actions: ${{ env.DEPLOYMENT_ID }}" \
+            --query 'deploymentId' \
+            --output text)
+          
+          echo "WORKER_DEPLOYMENT=$WORKER_DEPLOYMENT" >> $GITHUB_ENV
+          echo "Started deployment: $WORKER_DEPLOYMENT"
+
+      - name: Wait for Application Deployment
+        if: ${{ env.APP_DEPLOYMENT != '' }}
+        run: |
+          echo "⏳ Waiting for application deployment..."
+          aws deploy wait deployment-successful --deployment-id ${{ env.APP_DEPLOYMENT }} || {
+            echo "❌ Application deployment failed!"
+            aws deploy get-deployment --deployment-id ${{ env.APP_DEPLOYMENT }} --query 'deploymentInfo.errorInformation'
+            exit 1
+          }
+          echo "✅ Application deployment successful!"
+
+      - name: Wait for Worker Deployment
+        if: ${{ env.WORKER_DEPLOYMENT != '' }}
+        run: |
+          echo "⏳ Waiting for worker deployment..."
+          aws deploy wait deployment-successful --deployment-id ${{ env.WORKER_DEPLOYMENT }} || {
+            echo "❌ Worker deployment failed!"
+            aws deploy get-deployment --deployment-id ${{ env.WORKER_DEPLOYMENT }} --query 'deploymentInfo.errorInformation'
+            exit 1
+          }
+          echo "✅ Worker deployment successful!"
+
+      - name: Deployment Summary
+        run: |
+          echo ""
+          echo "========================================"
+          echo "      🎉 Deployment Complete! 🎉"
+          echo "========================================"
+          echo ""
+          echo "Deployment ID: ${{ env.DEPLOYMENT_ID }}"
+          echo "Application URL: http://tatvaops-vision-production-alb-189193662.ap-south-1.elb.amazonaws.com"
+          echo "Domain: https://vision.tatvaops.com"
+          echo ""
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Deploy target'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - application
+          - worker
+
+env:
+  AWS_REGION: ap-south-1
+  CODEDEPLOY_APP: tatvaops-vision-production-app
+  S3_BUCKET: tatvaops-vision-codedeploy-018858881354
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install and lint backend
+        working-directory: ./backend
+        run: |
+          npm ci
+          npm run lint || true
+
+      - name: Install and lint frontend
+        working-directory: ./frontend
+        run: |
+          npm ci
+          npm run lint || true
+
+  deploy:
+    name: Deploy via CodeDeploy
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create deployment package
+        run: |
+          DEPLOYMENT_ID=$(date +%Y%m%d%H%M%S)-$(echo $GITHUB_SHA | cut -c1-7)
+          echo "DEPLOYMENT_ID=$DEPLOYMENT_ID" >> $GITHUB_ENV
+          
+          # Create zip excluding unnecessary files
+          zip -r deployment-$DEPLOYMENT_ID.zip . \
+            -x "*.git*" \
+            -x "node_modules/*" \
+            -x ".next/*" \
+            -x "dist/*" \
+            -x "*.log" \
+            -x "infrastructure/terraform/*" \
+            -x "*.tfstate*" \
+            -x "*.pem"
+          
+          echo "Created: deployment-$DEPLOYMENT_ID.zip"
+          ls -la deployment-$DEPLOYMENT_ID.zip
+
+      - name: Upload to S3
+        run: |
+          aws s3 cp deployment-${{ env.DEPLOYMENT_ID }}.zip \
+            s3://${{ env.S3_BUCKET }}/deployments/deployment-${{ env.DEPLOYMENT_ID }}.zip
+          
+          echo "✅ Uploaded to S3"
+
+      - name: Deploy to Application Servers
+        if: ${{ github.event.inputs.target == 'all' || github.event.inputs.target == 'application' || github.event.inputs.target == '' }}
+        run: |
+          echo "🚀 Deploying to Application servers..."
+          
+          APP_DEPLOYMENT=$(aws deploy create-deployment \
+            --application-name ${{ env.CODEDEPLOY_APP }} \
+            --deployment-group-name application \
+            --s3-location bucket=${{ env.S3_BUCKET }},key=deployments/deployment-${{ env.DEPLOYMENT_ID }}.zip,bundleType=zip \
+            --description "GitHub Actions: ${{ env.DEPLOYMENT_ID }}" \
+            --query 'deploymentId' \
+            --output text)
+          
+          echo "APP_DEPLOYMENT=$APP_DEPLOYMENT" >> $GITHUB_ENV
+          echo "Started deployment: $APP_DEPLOYMENT"
+
+      - name: Deploy to Worker Servers
+        if: ${{ github.event.inputs.target == 'all' || github.event.inputs.target == 'worker' || github.event.inputs.target == '' }}
+        run: |
+          echo "🚀 Deploying to Worker servers..."
+          
+          WORKER_DEPLOYMENT=$(aws deploy create-deployment \
+            --application-name ${{ env.CODEDEPLOY_APP }} \
+            --deployment-group-name worker \
+            --s3-location bucket=${{ env.S3_BUCKET }},key=deployments/deployment-${{ env.DEPLOYMENT_ID }}.zip,bundleType=zip \
+            --description "GitHub Actions: ${{ env.DEPLOYMENT_ID }}" \
+            --query 'deploymentId' \
+            --output text)
+          
+          echo "WORKER_DEPLOYMENT=$WORKER_DEPLOYMENT" >> $GITHUB_ENV
+          echo "Started deployment: $WORKER_DEPLOYMENT"
+
+      - name: Wait for Application Deployment
+        if: ${{ env.APP_DEPLOYMENT != '' }}
+        run: |
+          echo "⏳ Waiting for application deployment..."
+          aws deploy wait deployment-successful --deployment-id ${{ env.APP_DEPLOYMENT }} || {
+            echo "❌ Application deployment failed!"
+            aws deploy get-deployment --deployment-id ${{ env.APP_DEPLOYMENT }} --query 'deploymentInfo.errorInformation'
+            exit 1
+          }
+          echo "✅ Application deployment successful!"
+
+      - name: Wait for Worker Deployment
+        if: ${{ env.WORKER_DEPLOYMENT != '' }}
+        run: |
+          echo "⏳ Waiting for worker deployment..."
+          aws deploy wait deployment-successful --deployment-id ${{ env.WORKER_DEPLOYMENT }} || {
+            echo "❌ Worker deployment failed!"
+            aws deploy get-deployment --deployment-id ${{ env.WORKER_DEPLOYMENT }} --query 'deploymentInfo.errorInformation'
+            exit 1
+          }
+          echo "✅ Worker deployment successful!"
+
+      - name: Deployment Summary
+        run: |
+          echo ""
+          echo "========================================"
+          echo "      🎉 Deployment Complete! 🎉"
+          echo "========================================"
+          echo ""
+          echo "Deployment ID: ${{ env.DEPLOYMENT_ID }}"
+          echo "Application URL: http://tatvaops-vision-production-alb-189193662.ap-south-1.elb.amazonaws.com"
+          echo "Domain: https://vision.tatvaops.com"
+          echo ""

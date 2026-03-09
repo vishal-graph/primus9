@@ -1,0 +1,92 @@
+# ===========================================
+# TatvaOps Vision - Terraform Variables
+# Copy this file to terraform.tfvars and fill in values
+# ===========================================
+
+# AWS Region
+aws_region = "ap-south-1"
+
+# Environment (dev, staging, production)
+environment = "production"
+
+# ===========================================
+# VPC Configuration
+# ===========================================
+
+vpc_cidr = "10.0.0.0/16"
+
+public_subnet_cidrs   = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+private_subnet_cidrs  = ["10.0.11.0/24", "10.0.12.0/24", "10.0.13.0/24"]
+database_subnet_cidrs = ["10.0.21.0/24", "10.0.22.0/24", "10.0.23.0/24"]
+
+# ===========================================
+# RDS PostgreSQL Configuration
+# ===========================================
+
+# Instance class options:
+# - db.t3.micro (dev, 2 vCPU, 1GB RAM)
+# - db.t3.small (dev/staging, 2 vCPU, 2GB RAM)
+# - db.t3.medium (staging/prod, 2 vCPU, 4GB RAM)
+# - db.r6g.large (production, 2 vCPU, 16GB RAM)
+# - db.r6g.xlarge (high traffic, 4 vCPU, 32GB RAM)
+db_instance_class = "db.t3.medium"
+
+# Storage (will auto-scale up to max)
+db_allocated_storage     = 20
+db_max_allocated_storage = 100
+
+# PostgreSQL version
+db_engine_version = "15.4"
+
+# Database name
+db_name     = "tatvaops_vision"
+db_username = "tatvaops_admin"
+
+# Backup configuration
+db_backup_retention_period = 7
+db_backup_window           = "03:00-04:00"
+db_maintenance_window      = "Mon:04:00-Mon:05:00"
+
+# High availability (recommended for production)
+db_multi_az = true
+
+# Protection (set to false only for dev)
+db_deletion_protection = true
+
+# Performance monitoring
+db_performance_insights_enabled = true
+
+# ===========================================
+# ElastiCache Redis Configuration
+# ===========================================
+
+# Node type options:
+# - cache.t3.micro (dev, 0.5GB)
+# - cache.t3.small (dev/staging, 1.37GB)
+# - cache.t3.medium (staging/prod, 3.09GB)
+# - cache.r6g.large (production, 13.07GB)
+redis_node_type = "cache.t3.micro"
+
+# Number of nodes (1 for single node, more for cluster)
+redis_num_cache_nodes = 1
+
+# Redis version
+redis_engine_version = "7.0"
+
+# ===========================================
+# EC2 Configuration
+# ===========================================
+
+# Instance type for application servers
+ec2_instance_type = "t3.medium"
+
+# SSH key pair name (create in AWS Console first)
+ec2_key_name = "tatvaops-vision-key"
+
+# ===========================================
+# Domain Configuration
+# ===========================================
+
+# Your domain name (leave empty if not using custom domain)
+domain_name = "vision.tatvaops.com"
+
