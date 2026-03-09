@@ -7,9 +7,9 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 
-# Install dependencies only when needed
-COPY package.json package-lock.json* ./
-COPY prisma ./prisma/
+# Build context is the repo root; source files live in backend/
+COPY backend/package.json backend/package-lock.json* ./
+COPY backend/prisma ./prisma/
 
 RUN npm ci --only=production
 RUN npx prisma generate
@@ -24,11 +24,11 @@ WORKDIR /app
 RUN apk add --no-cache openssl openssl-dev
 
 # Install ALL dependencies (dev + prod) so tsc is available
-COPY package.json package-lock.json* ./
-COPY prisma ./prisma/
+COPY backend/package.json backend/package-lock.json* ./
+COPY backend/prisma ./prisma/
 RUN npm ci
 
-COPY . .
+COPY backend/ .
 
 # Regenerate Prisma client (ensures it's up-to-date with schema)
 RUN npx prisma generate
