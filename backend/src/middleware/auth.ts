@@ -64,9 +64,16 @@ export async function authMiddleware(
     
     try {
       // Use verifyToken with secretKey for backend verification
+      // Added primus9.ai primary domains to authorized parties
       const verified = await verifyToken(token, {
         secretKey: config.clerkSecretKey,
-        authorizedParties: ['http://localhost:3000', 'http://localhost:3001', 'https://vision.tatvaops.com'],
+        authorizedParties: [
+          'http://localhost:3000', 
+          'http://localhost:3001', 
+          'https://vision.tatvaops.com',
+          'https://primus9.ai',
+          'https://www.primus9.ai'
+        ],
       });
       clerkUserId = verified.sub;
       logger.debug({ clerkUserId }, 'Token verified successfully');
