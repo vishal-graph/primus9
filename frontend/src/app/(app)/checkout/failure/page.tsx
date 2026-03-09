@@ -277,7 +277,7 @@ function CheckoutFailureContent() {
             </Button>
             <Button
               fullWidth
-              href="mailto:support@tatvaops.com"
+              href="mailto:support@primus9.ai"
               target="_blank"
               rel="noopener noreferrer"
               component="a"
@@ -287,8 +287,8 @@ function CheckoutFailureContent() {
                 px: 3,
                 fontSize: '1.125rem',
                 fontWeight: 500,
-                borderRadius: '0.75rem',
                 ...glassCardSx,
+                borderRadius: '0.75rem',
                 color: '#fff',
                 border: '1px solid #3f3f46',
                 textTransform: 'none',
