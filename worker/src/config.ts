@@ -32,12 +32,12 @@ const configSchema = z.object({
   s3BucketRenders: z.string(),
   s3BucketExports: z.string(),
 
-  // AWS SQS Queues
-  sqsQueueFloorplanAnalysis: z.string(),
-  sqsQueueMoodboardGeneration: z.string(),
-  sqsQueueInteriorViewGeneration: z.string(),
-  sqsQueueComponentUpdate: z.string(),
-  sqsQueueNotification: z.string(),
+  // AWS SQS Queues (Deprecated - Now using BullMQ)
+  sqsQueueFloorplanAnalysis: z.string().optional(),
+  sqsQueueMoodboardGeneration: z.string().optional(),
+  sqsQueueInteriorViewGeneration: z.string().optional(),
+  sqsQueueComponentUpdate: z.string().optional(),
+  sqsQueueNotification: z.string().optional(),
   sqsQueuePdfExport: z.string().optional(),
 
   // SQS Settings
