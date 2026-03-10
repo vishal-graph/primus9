@@ -26,8 +26,11 @@ RUN apk add --no-cache openssl openssl-dev
 # Build Worker package first
 # It has its own package.json and needs to be compiled to dist/
 COPY worker/package.json worker/package-lock.json* ./worker/
+# The worker needs the prisma schema to generate its own client types
+COPY backend/prisma/ ./worker/prisma/
 RUN cd worker && npm ci
 COPY worker/ ./worker/
+RUN cd worker && npx prisma generate
 RUN cd worker && npm run build
 
 # Install ALL dependencies (dev + prod) for Backend so tsc is available
