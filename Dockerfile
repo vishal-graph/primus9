@@ -70,6 +70,7 @@ COPY --from=builder /app/backend/prisma ./prisma
 
 # Copy built worker files so backend can require them at ../worker/dist/handlers
 COPY --from=builder /app/worker/dist /worker/dist
+COPY --from=builder /app/worker/node_modules /worker/node_modules
 
 # Set correct ownership
 RUN chown -R expressjs:nodejs /app
