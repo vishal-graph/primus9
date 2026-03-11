@@ -17,6 +17,7 @@ export type ProjectStage =
 export interface Project {
   id: string;
   userId: string;
+  slug?: string;
   name: string;
   currentStage: ProjectStage;
   createdAt: Date;

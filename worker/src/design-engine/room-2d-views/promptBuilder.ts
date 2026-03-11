@@ -8,6 +8,8 @@ import { buildGeometryConstraintString } from '../elevation/geometryValidator';
 import { buildStyleInstructionString } from '../elevation/styleExtractor';
 import { Room2DViewType } from './types';
 import { RoomElevationGeometry, WallGeometry } from '../elevation/types';
+import { DesignIntent } from '../types';
+import { getRoomContext } from '../common/roomContext';
 
 /** Build prompt for single corner bird's-eye room view (~280–300°). Moodboard = primary, elevation = secondary. */
 export function buildBirdViewPrompt(params: {
@@ -15,8 +17,9 @@ export function buildBirdViewPrompt(params: {
   styleInstruction: string;
   connectedRooms: string[];
   isometricUrl?: string;
+  designIntent?: DesignIntent;
 }): string {
-  const { roomGeometry, styleInstruction, connectedRooms, isometricUrl } = params;
+  const { roomGeometry, styleInstruction, connectedRooms, isometricUrl, designIntent } = params;
   const connectedRoomsText =
     connectedRooms.length > 0 ? `Connected rooms: ${connectedRooms.join(', ')}` : 'No connected rooms detected.';
 
@@ -40,7 +43,7 @@ export function buildBirdViewPrompt(params: {
     '',
     '=== STYLE (FROM MOODBOARD - PRIMARY) ===',
     styleInstruction,
-    ...INDIAN_CONTEXT,
+    designIntent ? getRoomContext(designIntent) : INDIAN_CONTEXT.join('\n'),
     'Extract and apply from moodboard: color palette, materials, textures, furniture style, Indian design elements, lighting mood, wall treatments, flooring type, decorative elements.',
     '',
     '=== DESIGN SOURCE PRIORITY ===',
@@ -56,9 +59,11 @@ export function buildBirdViewPrompt(params: {
 }
 
 const INDIAN_CONTEXT = [
-  'Use Indian residential interior context and references.',
-  'Prefer Indian materials and finishes: teak/rosewood, cane, jali patterns, brass, terracotta, local ceramics, handwoven textiles.',
-  'Avoid Western-centric or Euro-American decor unless explicitly present in the moodboard.',
+  '=== CRITICAL INDIAN ARCHITECTURAL CONTEXT ===',
+  '1. MATERIALS: Use Indian finishes (vitrified tiles, Kota stone, marble flooring, terrazzo, teak/sheesham wood). STRICTLY NO wall-to-wall carpets or rustic Western farmhouse wood.',
+  '2. TROPICAL DESIGN: Show adaptations for Indian climates (cross-ventilation spacing, ceiling fans, sheer curtains + drapes, window security grills). STRICTLY NO fireplaces or heavy velvet drapes.',
+  '3. DEMOGRAPHICS: Halls/Living must have prominent communal seating/diwans, TV units, and Pooja spaces. Kitchens must have heavy-duty wet areas, deep sinks, and closed lofts. Bathrooms must have wet/dry slopes, health faucets, and anti-skid tiles. Bedrooms must have platform beds and ceiling-height wardrobes.',
+  '4. AESTHETICS: Incorporate Indian crafts, jali partitions, brass accents, and vibrant textiles (block prints). Avoid Euro-American sterile modernism.',
 ];
 
 export function buildRoom2DViewPrompt(params: {
@@ -69,6 +74,7 @@ export function buildRoom2DViewPrompt(params: {
   connectedRooms: string[];
   isometricUrl?: string;
   wallType: 'solid' | 'partial' | 'open';
+  designIntent?: DesignIntent;
 }): string {
   const {
     viewType,
@@ -78,6 +84,7 @@ export function buildRoom2DViewPrompt(params: {
     connectedRooms,
     isometricUrl,
     wallType,
+    designIntent,
   } = params;
 
   const geometryString = buildGeometryConstraintString(wall, roomGeometry.roomName);
@@ -113,7 +120,7 @@ export function buildRoom2DViewPrompt(params: {
     '',
     '=== STYLE (FROM MOODBOARD) ===',
     styleInstruction,
-    ...INDIAN_CONTEXT,
+    designIntent ? getRoomContext(designIntent) : INDIAN_CONTEXT.join('\n'),
     'Extract and apply: color palette, materials, textures, furniture style, Indian design elements, lighting mood, wall treatments, flooring type, decorative elements, ceiling inspiration.',
     '',
     '=== DESIGN SOURCE PRIORITY ===',
@@ -133,8 +140,9 @@ export function buildRoom2DViewPrompt(params: {
 export function buildCeilingViewPrompt(params: {
   roomGeometry: RoomElevationGeometry;
   styleInstruction: string;
+  designIntent?: DesignIntent;
 }): string {
-  const { roomGeometry, styleInstruction } = params;
+  const { roomGeometry, styleInstruction, designIntent } = params;
 
   return [
     'You are an expert interior designer AI specialized in Indian residential interiors.',
@@ -152,7 +160,7 @@ export function buildCeilingViewPrompt(params: {
     '',
     '=== STYLE (FROM MOODBOARD) ===',
     styleInstruction,
-    ...INDIAN_CONTEXT,
+    designIntent ? getRoomContext(designIntent) : INDIAN_CONTEXT.join('\n'),
     'Extract and apply: color palette, materials, textures, furniture style, Indian design elements, lighting mood, wall treatments, flooring type, decorative elements, ceiling inspiration.',
     '',
     '=== OUTPUT REQUIREMENTS ===',

@@ -5,6 +5,7 @@
  */
 
 import { RoomElevationGeometry, WallGeometry } from '../elevation/types';
+import { DesignIntent } from '../types';
 
 export type Room2DViewType =
   | 'BIRD_VIEW'
@@ -23,6 +24,7 @@ export interface Room2DViewInput {
   moodboardUrl: string;
   connectedRooms: string[];
   isometricUrl?: string;
+  designIntent?: DesignIntent;
   version?: number;
 }
 

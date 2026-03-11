@@ -194,7 +194,10 @@ export async function handleRoom2DViewsGeneration(
     });
 
     if (!isometricElevation) {
-      throw new Error('Missing isometric elevation for project');
+      logger.warn('No isometric elevation found for project — proceeding without it', {
+        jobId,
+        projectId,
+      });
     }
 
     // No geometry validation. Bird view uses moodboard (primary) + elevation (secondary) only.
@@ -216,7 +219,7 @@ export async function handleRoom2DViewsGeneration(
       roomGeometry,
       moodboardUrl,
       connectedRooms,
-      isometricUrl: isometricElevation.imageUrl,
+      isometricUrl: isometricElevation?.imageUrl ?? undefined,
       version,
     });
 

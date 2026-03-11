@@ -22,6 +22,8 @@ import {
 import { buildGeometryDescription } from './geometryValidator';
 import { buildStyleDescription } from './styleMapper';
 import { logger } from '../../lib/logger';
+import { DesignIntent } from '../types';
+import { getRoomContext } from '../common/roomContext';
 
 // ===========================================
 // Main Prompt Builder
@@ -37,7 +39,8 @@ import { logger } from '../../lib/logger';
  */
 export function buildIsometricPrompt(
   geometry: FloorGeometry,
-  styleMap: FloorStyleMap
+  styleMap: FloorStyleMap,
+  designIntent?: DesignIntent
 ): IsometricPrompt {
   logger.info('Building isometric generation prompt', {
     floor: geometry.floor,
@@ -48,9 +51,10 @@ export function buildIsometricPrompt(
   const geometrySection = buildGeometryDescription(geometry);
   const styleSection = buildStyleDescription(styleMap);
   const prohibitions = buildProhibitionsList();
+  const indianContext = designIntent ? getRoomContext(designIntent) : '';
 
   // Compose final prompt
-  const prompt = composePrompt(geometry, geometrySection, styleSection, prohibitions);
+  const prompt = composePrompt(geometry, geometrySection, styleSection, prohibitions, indianContext);
 
   // Generate prompt hash
   const promptHash = generatePromptHash(prompt);
@@ -80,7 +84,8 @@ function composePrompt(
   geometry: FloorGeometry,
   geometrySection: string,
   styleSection: string,
-  prohibitions: string[]
+  prohibitions: string[],
+  indianContext?: string
 ): string {
   const lines: string[] = [];
 
@@ -112,6 +117,19 @@ function composePrompt(
   lines.push('9. 4K resolution minimum (3840x2160)');
   lines.push('10. NO perspective camera effects or depth of field');
   lines.push('11. NO text labels, dimensions, room names, or annotations of any kind');
+  lines.push('');
+  lines.push('=== AUTHENTIC INDIAN RESIDENTIAL CONTEXT (NON-NEGOTIABLE) ===');
+  if (indianContext) {
+    lines.push(indianContext);
+  } else {
+    lines.push('12. The entire 3D model MUST look like a traditional or modern Indian home in a tropical climate.');
+    lines.push('13. Use Indian flooring (Marble, Vitrified Tiles, Terrazzo, Kota Stone). NO wall-to-wall carpets or distressed rustic wood.');
+    lines.push('14. If a Hall/Living Room is shown, it connects organically to Dining/Kitchen spaces. Include communal seating (diwans, large sofas) and integrated Pooja/Mandir spaces or prominent TV units.');
+    lines.push('15. Kitchens MUST be Indian style (e.g., granite/quartz tops, heavy-duty sinks, closed lofts, no western-style open shelving).');
+    lines.push('16. Bathrooms MUST show Indian wet/dry separation (slope or glass) and health faucets.');
+    lines.push('17. ALL Balconies/Utility areas must have practical functional setups (washing machines, terracotta pots, drying racks).');
+    lines.push('18. Show Indian tropical aesthetics: Ceiling fans in EVERY major room, Jali (lattice) partitions, block print textiles, teak/sheesham wood.');
+  }
   lines.push('');
 
   // ===========================================
@@ -297,6 +315,7 @@ export function validatePrompt(prompt: IsometricPrompt): boolean {
 export function buildLayoutConstrainedPrompt(
   geometry: FloorGeometry,
   styleMap: FloorStyleMap,
+  designIntent?: DesignIntent,
   strict: boolean = false
 ): string {
   // Build room style descriptions
@@ -346,6 +365,8 @@ ${geometry.rooms.map(r => `• ${r.roomName} at (${r.boundingBox.x}, ${r.boundin
 
 Room Styling (apply to each room):
 ${roomStyleList}
+
+${designIntent ? getRoomContext(designIntent) : ''}
 
 RENDERING REQUIREMENTS:
 1. ✅ MATCH the layout image positions EXACTLY
@@ -397,7 +418,7 @@ export function buildSimplifiedPrompt(
         styleParts.push(`furniture: ${style.furniture.pieces.slice(0, 3).join(', ')}`);
       }
     } else {
-      styleParts.push('modern style, neutral walls, hardwood floor');
+      styleParts.push('modern Indian style, neutral walls, vitrified tile floor');
     }
     
     return `  • ${room.roomName} (${room.roomType}): position (${x}, ${y}), size ${width}x${height} → ${styleParts.join(', ')}`;

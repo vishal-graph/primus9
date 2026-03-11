@@ -51,7 +51,7 @@ export async function uploadFloorPlan(
   projectId: string,
   formData: FormData,
   projectName?: string
-): Promise<{ success: boolean; imageUrl?: string; projectId?: string; error?: string }> {
+): Promise<{ success: boolean; imageUrl?: string; projectId?: string; slug?: string; error?: string }> {
   try {
     const { getToken } = await auth();
     const token = await getToken();
@@ -74,6 +74,7 @@ export async function uploadFloorPlan(
 
     // If projectId is "new", create a new project first
     let actualProjectId = projectId;
+    let actualSlug = projectId;
     if (projectId === 'new' || !projectId) {
       // Use provided name or generate a default one
       const finalProjectName = projectName?.trim() || `Floor Plan - ${new Date().toLocaleDateString()}`;
@@ -122,7 +123,8 @@ export async function uploadFloorPlan(
 
       const { data: newProject } = await createResponse.json();
       actualProjectId = newProject.id;
-      console.log('[FloorPlan] Created project:', actualProjectId);
+      actualSlug = newProject.slug || newProject.id;
+      console.log('[FloorPlan] Created project:', actualProjectId, 'with slug:', actualSlug);
     }
 
     // 1. Get presigned URL for upload
@@ -190,7 +192,8 @@ export async function uploadFloorPlan(
     // Construct the full S3 URL
     const s3Url = `https://tatvaops-vision-production-floorplans.s3.ap-south-1.amazonaws.com/${key}`;
     
-    return { success: true, imageUrl: s3Url, projectId: actualProjectId };
+    // Return actualSlug so frontend can navigate to /project/[slug]/[stage]
+    return { success: true, imageUrl: s3Url, projectId: actualProjectId, slug: actualSlug };
   } catch (error) {
     console.error('Upload error:', error);
     return { success: false, error: 'Upload failed' };

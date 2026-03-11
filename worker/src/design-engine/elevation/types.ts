@@ -13,6 +13,8 @@
  * ============================================================
  */
 
+import { DesignIntent } from '../types';
+
 // ============================================
 // WALL DIRECTION
 // ============================================
@@ -214,6 +216,9 @@ export interface WallElevationInput {
   /** Style to apply */
   style: ElevationStyle;
   
+  /** Design intent/preferences */
+  designIntent?: DesignIntent;
+  
   /** Moodboard image URL for reference (optional) */
   moodboardUrl?: string;
   
@@ -271,6 +276,9 @@ export interface ElevationJobInput {
   
   /** Moodboard URL for style extraction */
   moodboardUrl?: string;
+
+  /** Design intent/preferences */
+  designIntent?: DesignIntent;
   
   /** Which walls to generate (default: all 4) */
   wallsToGenerate?: WallDirection[];

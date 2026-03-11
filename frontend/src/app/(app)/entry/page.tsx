@@ -58,10 +58,10 @@ export default function EntryPage() {
     setShowUploadingOverlay(false);
   };
 
-  const handleUploadSuccess = (projectId: string, jobId: string) => {
+  const handleUploadSuccess = (slug: string) => {
     setUploadModalOpen(false);
     setShowUploadingOverlay(false);
-    router.push(`/upload/success?projectId=${projectId}&jobId=${jobId}`);
+    router.push(`/project/${slug}/processing`);
   };
 
   return (

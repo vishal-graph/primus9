@@ -317,20 +317,8 @@ export function ElevationStage({ projectId }: ElevationStageProps) {
         ? `${apiBase}/public/download?s3Key=${encodeURIComponent(s3Key)}&filename=${encodeURIComponent(filename)}`
         : `${apiBase}/public/download?url=${encodeURIComponent(currentElevation.imageUrl)}&filename=${encodeURIComponent(filename)}`;
       
-      // Fetch as blob to enable automatic download (bypasses cross-origin download attribute limitations)
-      const response = await fetch(downloadUrl, { credentials: 'include' });
-      if (!response.ok) throw new Error('Download failed');
-      
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
+      // Use window.location to trigger the browser's native download
+      window.location.assign(downloadUrl);
     } catch (err) {
       console.error('Download failed:', err);
     }

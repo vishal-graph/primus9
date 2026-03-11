@@ -78,11 +78,12 @@ const resolveS3Location = (s3Key: string, providedBucket?: string | null): S3Res
     prefix = 'floorplans';
   } else if (s3Key.startsWith('exports/')) {
     bucketName = config.s3BucketExports;
-    objectKey = s3Key;  // Keep the full key including 'exports/' prefix
+    objectKey = s3Key; // Keep the full key including 'exports/' prefix if that's how it's stored
     prefix = 'exports';
   }
 
   return { bucketName, objectKey, prefix };
+
 };
 
 // ===========================================

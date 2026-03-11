@@ -12,6 +12,7 @@
 
 import { DesignIntent, RegenerationOverrides } from '../types';
 import { createHash } from 'crypto';
+import { getRoomContext } from '../common/roomContext';
 
 // ===========================================
 // Prompt Building
@@ -44,6 +45,9 @@ export function applyRegenerationOverrides(
     decorPreferences: overrides.decor ?? intent.decorPreferences,
     lightingPreferences: overrides.lighting ?? intent.lightingPreferences,
     notes: overrides.notes ?? intent.notes,
+    budget: overrides.budget ?? intent.budget,
+    maintenanceTolerance: overrides.maintenanceTolerance ?? intent.maintenanceTolerance,
+    executionPriority: overrides.executionPriority ?? intent.executionPriority,
   };
 }
 
@@ -63,9 +67,13 @@ export function buildMoodboardPrompt(intent: DesignIntent): string {
   // PRESERVED: Exact prompt structure from moodboard-main
   // Lines 56-105 from moodboard-main/app/api/moodboard/route.ts
   const promptLines = [
-    // Opening instruction
     'Create a high-resolution interior design moodboard in a dense collage style with overlapping images, torn paper edges, pinned swatches, taped corners, textured backgrounds, and no empty space. Use the following extracted design inputs:',
-    'IMPORTANT: Use Indian interior design context and references for the room. Prefer Indian materials, finishes, textiles, craftsmanship, and decor motifs (e.g., cane, jali patterns, brass, terracotta, teak/rosewood, handwoven textiles, local ceramics, Indian art). Avoid Western-centric or Euro-American decor references.',
+    'CRITICAL: Generate exclusively within an authentic, practical Indian residential context. Adhere STRICTLY to the following demographic and architectural rules:',
+    '1. MATERIALS & FINISHES: Use practical Indian surfaces like vitrified tiles, Kota stone, marble, terrazzo, or teak/sheesham wood. Avoid wall-to-wall carpeting, distressed rustic farmhouse wood, or faux-brick walls.',
+    '2. TROPICAL CLIMATE: Ensure spaces look adapted for Indian climates (e.g., cross-ventilation, ceiling fans, sheer curtains mixed with drapes, window security grills). Avoid fireplaces, heavy velvet drapes, or thick woolen rugs.',
+    '3. DEMOGRAPHIC USAGE: If Hall/Living, emphasize communal seating (diwans, large sofas), prominent TV units, and integrated Pooja/Mandir spaces. If Kitchen, ensure heavy-duty wet areas, deep sinks, and extensive closed lofts for spices. If Bathroom, mandate wet/dry separation (slope/glass), health faucets (bidet sprays), and anti-skid tiles. If Balcony, include drying racks or jhoolas (swings).',
+    '4. AESTHETICS: Avoid Euro-American centric decor. Lean into Indian crafts, handwoven textiles (Ikat, block prints), jali partition screens, brass accents, and terracotta decor where appropriate.',
+    getRoomContext(intent),
     '',
     // Design parameters
     `Room Type: ${intent.roomType}`,

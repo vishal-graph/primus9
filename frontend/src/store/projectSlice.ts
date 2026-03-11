@@ -15,6 +15,7 @@ import type { Room } from '@/types/room';
 export interface Project {
   id: string;
   userId: string;
+  slug?: string;
   name: string;
   currentStage: ProjectStage;
   floorPlanUrl?: string;

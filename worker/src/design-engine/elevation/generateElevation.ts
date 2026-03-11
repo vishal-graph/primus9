@@ -175,6 +175,7 @@ export async function generateRoomElevations(
           wallDirection: direction,
           style,
           moodboardUrl: input.moodboardUrl,
+          designIntent: input.designIntent,
           version: input.version,
         });
         
@@ -275,7 +276,7 @@ async function generateSingleWallElevation(
   // PASS 3: BUILD PROMPT
   // =============================================
   
-  const prompt = buildElevationPrompt(wall, style, roomGeometry);
+  const prompt = buildElevationPrompt(wall, style, roomGeometry, input.designIntent);
   
   // Validate prompt contains all mandatory constraints
   const promptValidation = validatePrompt(prompt);

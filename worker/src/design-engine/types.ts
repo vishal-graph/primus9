@@ -30,6 +30,11 @@ export interface DesignIntent {
   decorPreferences: string;
   lightingPreferences: string;
   notes: string;
+  
+  // Practical constraints
+  budget?: string; // Economy, Standard, Premium
+  maintenanceTolerance?: string; // Low, Medium, High
+  executionPriority?: string; // Quality, Speed, Cost
 }
 
 /**
@@ -48,6 +53,11 @@ export interface RegenerationOverrides {
   decor?: string | null;
   lighting?: string | null;
   notes?: string | null;
+  
+  // Practical constraints overrides
+  budget?: string | null;
+  maintenanceTolerance?: string | null;
+  executionPriority?: string | null;
 }
 
 // ===========================================

@@ -139,10 +139,10 @@ export default function DashboardPage() {
     setShowUploadingOverlay(false);
   };
 
-  const handleUploadSuccess = (projectId: string, jobId: string) => {
+  const handleUploadSuccess = (slug: string) => {
     setUploadModalOpen(false);
     setShowUploadingOverlay(false);
-    router.push(`/upload/success?projectId=${projectId}&jobId=${jobId}`);
+    router.push(`/project/${slug}/processing`);
   };
 
   const filteredProjects = projects.filter((project) => {
@@ -203,8 +203,9 @@ export default function DashboardPage() {
     return date.toLocaleDateString();
   };
 
-  const handleProjectClick = (projectId: string) => {
-    router.push(`/project/${projectId}`);
+  const handleProjectClick = (project: any) => {
+    const slug = project.slug || project.id;
+    router.push(`/project/${slug}/floor-plan`);
   };
 
   const handleMenuOpen = (event: React.MouseEvent<HTMLElement>, project: Project) => {
@@ -345,7 +346,7 @@ export default function DashboardPage() {
                 <EmptyState icon={<Add sx={{ fontSize: 40, color: 'primary.main' }} />} title="No projects yet" description="Create your first project by uploading a floor plan or starting from scratch." actionLabel="Create project" onAction={() => setUploadModalOpen(true)} />
               ) : (
                 filteredProjects.map((project) => (
-                  <Box key={project.id} id={`${PROJECT_CARD_ID_PREFIX}${project.id}`} onClick={() => handleProjectClick(project.id)} sx={{ display: 'flex', alignItems: 'center', px: 2, py: 2, borderBottom: 1, borderColor: border, cursor: 'pointer', '&:hover': { bgcolor: isDark ? alpha(SURFACE_DARK, 0.6) : alpha(BORDER_LIGHT, 0.5) } }}>
+                  <Box key={project.id} id={`${PROJECT_CARD_ID_PREFIX}${project.id}`} onClick={() => handleProjectClick(project)} sx={{ display: 'flex', alignItems: 'center', px: 2, py: 2, borderBottom: 1, borderColor: border, cursor: 'pointer', '&:hover': { bgcolor: isDark ? alpha(SURFACE_DARK, 0.6) : alpha(BORDER_LIGHT, 0.5) } }}>
                     <Box sx={{ width: 80, height: 60, mr: 2, borderRadius: 1, overflow: 'hidden', bgcolor: border }}>{project.floorPlanUrl ? <Box component="img" src={project.floorPlanUrl} alt="" sx={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : null}</Box>
                     <Box sx={{ flex: 1 }}>
                       <Typography sx={{ fontWeight: 600, color: textMain }}>{project.name}</Typography>
@@ -368,7 +369,7 @@ export default function DashboardPage() {
               </Box>
               {filteredProjects.map((project) => (
                 <Box key={project.id} id={`${PROJECT_CARD_ID_PREFIX}${project.id}`} sx={{ minHeight: 0 }}>
-                  <ProjectCard project={project} onFavoriteToggle={(e) => handleToggleFavorite(e, project)} onMenuOpen={(e) => handleMenuOpen(e, project)} onClick={() => handleProjectClick(project.id)} formatDate={formatDate} />
+                  <ProjectCard project={project} onFavoriteToggle={(e) => handleToggleFavorite(e, project)} onMenuOpen={(e) => handleMenuOpen(e, project)} onClick={() => handleProjectClick(project)} formatDate={formatDate} />
                 </Box>
               ))}
             </Box>

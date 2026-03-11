@@ -63,11 +63,20 @@ logger.info('Worker process initialized');
 // Render Web Services require an open port to pass health checks.
 // Since this is a worker, we fake an HTTP server so Render doesn't kill it.
 import http from 'http';
-const port = process.env.PORT || 4000;
+const port = process.env.WORKER_PORT || process.env.PORT ? parseInt(process.env.PORT as string) + 1 : 4001;
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('Worker is active');
 });
+
+server.on('error', (e: NodeJS.ErrnoException) => {
+  if (e.code === 'EADDRINUSE') {
+    logger.warn(`Dummy health check port ${port} is in use. Worker will continue without it (this is fine for local dev).`);
+  } else {
+    logger.error({ error: e }, 'Dummy health check server error');
+  }
+});
+
 server.listen(port, () => {
   logger.info(`Dummy health check server listening on port ${port}`);
 });

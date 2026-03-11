@@ -75,6 +75,7 @@ model Project {
   id           String       @id @default(uuid())
   userId       String
   name         String
+  slug         String       @unique // URL-friendly kebab-case name (e.g. "my-living-room")
   currentStage ProjectStage @default(FLOOR_PLAN)
   floorPlanUrl String?
   isFavorite   Boolean      @default(false)
@@ -108,6 +109,7 @@ model Project {
   @@index([userId, deletedAt])
   @@index([planCode])
   @@index([planSource])
+  @@index([slug])
 }
 
 enum PlanSource {

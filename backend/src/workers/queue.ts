@@ -9,14 +9,15 @@ import { logger } from '../lib/logger';
  * Replaces AWS SQS for better local development and lower latency
  */
 
-const connection = {
-  host: new URL(config.redisUrl).hostname,
-  port: parseInt(new URL(config.redisUrl).port || '6379'),
-  password: new URL(config.redisUrl).password || undefined,
-  tls: config.redisUrl.startsWith('rediss://') ? {} : undefined,
-  family: 0, // Force IPv4/IPv6 heuristic (required for some Redis providers)
-  keepAlive: 10000, // Important for Upstash serverless connections
-};
+import IORedis from 'ioredis';
+
+// Create a dedicated Redis connection for BullMQ using the full URL connection string
+// This guarantees that all username, password, and TLS configurations in the URL are respected
+const connection = new IORedis(config.redisUrl, {
+  maxRetriesPerRequest: null,
+  family: 0, // Force IPv4/IPv6 heuristic (required for Upstash and some local IPs)
+  enableReadyCheck: false,
+});
 
 logger.info({
   host: connection.host,

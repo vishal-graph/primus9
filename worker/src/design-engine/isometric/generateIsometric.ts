@@ -153,7 +153,7 @@ export async function generateIsometricElevation(
     
     logger.info('Stage 3: Building generation prompt');
     
-    const fullPrompt = buildIsometricPrompt(validatedGeometry, styleMap);
+    const fullPrompt = buildIsometricPrompt(validatedGeometry, styleMap, input.designIntent);
     
     if (!validatePrompt(fullPrompt)) {
       throw new IsometricGenerationError(
@@ -280,6 +280,7 @@ export async function generateIsometricElevation(
         const constrainedPrompt = buildLayoutConstrainedPrompt(
           validatedGeometry,
           styleMap,
+          input.designIntent,
           attempts > 1 // Stricter prompt on retries
         );
         

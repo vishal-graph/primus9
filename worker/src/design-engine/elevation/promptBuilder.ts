@@ -29,6 +29,8 @@ import {
 import { buildGeometryConstraintString } from './geometryValidator';
 import { buildStyleInstructionString } from './styleExtractor';
 import { logger } from '../../lib/logger';
+import { DesignIntent } from '../types';
+import { getRoomContext } from '../common/roomContext';
 
 // ============================================
 // CONSTANTS
@@ -76,7 +78,8 @@ const PROHIBITED_ELEMENTS = [
 export function buildElevationPrompt(
   wall: WallGeometry,
   style: ElevationStyle,
-  roomGeometry: RoomElevationGeometry
+  roomGeometry: RoomElevationGeometry,
+  designIntent?: DesignIntent
 ): string {
   logger.info('Building elevation prompt', {
     roomId: roomGeometry.roomId,
@@ -94,7 +97,7 @@ export function buildElevationPrompt(
     buildGeometrySection(wall, roomGeometry),
     
     // === SECTION 4: STYLE GUIDELINES (FROM MOODBOARD) ===
-    buildStyleSection(style, wall.direction, roomGeometry.roomName),
+    buildStyleSection(style, wall.direction, roomGeometry.roomName, designIntent),
     
     // === SECTION 5: OUTPUT REQUIREMENTS ===
     buildOutputSection(),
@@ -186,7 +189,8 @@ function buildGeometrySection(
 function buildStyleSection(
   style: ElevationStyle,
   direction: WallDirection,
-  roomName: string
+  roomName: string,
+  designIntent?: DesignIntent
 ): string {
   const styleString = buildStyleInstructionString(style, direction, roomName);
   
@@ -196,6 +200,15 @@ function buildStyleSection(
     'Apply these visual styles to the EXISTING geometry only:',
     '',
     styleString,
+    '',
+    designIntent ? getRoomContext(designIntent) : `
+=== AUTHENTIC INDIAN RESIDENTIAL CONTEXT ===
+Ensure all finishes reflect practical Indian homes:
+- Windows: Must have security grills or mesh if visible.
+- Floors: Must have 4-inch skirting tiles matching vitrified/marble flooring.
+- Doors: If present, use solid teak/sheesham wood paneling designs typical of Indian interiors.
+- Ceilings: If visible, show standard Indian ceiling heights (10ft) with ceiling fans or simple cove lighting.
+- Decor (if added): Avoid fireplaces, heavy drapes, or excessive western wooden wall panelling.`,
     '',
     'NOTE: Style affects FINISHES ONLY. Style cannot add or remove structural elements.',
   ];

@@ -50,6 +50,7 @@ export async function generateRoom2DViews(
     styleInstruction,
     connectedRooms: input.connectedRooms,
     isometricUrl: input.isometricUrl,
+    designIntent: input.designIntent,
   });
 
   const promptHash = hashPrompt(prompt);

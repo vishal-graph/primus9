@@ -106,6 +106,7 @@ export function UploadModal({
 
     try {
       let projectId: string;
+      let slug: string;
       let imageUrl: string;
 
       if (isInternal && selectedPlan) {
@@ -129,6 +130,7 @@ export function UploadModal({
           throw new Error(data.error?.message || 'Failed to create project');
         }
         projectId = data.data.id;
+        slug = data.data.slug || projectId;
         setUploadProgress(20);
         const formData = new FormData();
         formData.set('file', file);
@@ -147,6 +149,7 @@ export function UploadModal({
           throw new Error(uploadResult.error || 'Upload failed');
         }
         projectId = uploadResult.projectId;
+        slug = uploadResult.slug || projectId;
         imageUrl = uploadResult.imageUrl;
       }
 
@@ -158,7 +161,7 @@ export function UploadModal({
       setUploadProgress(100);
       setShowCheckmark(true);
       await new Promise((r) => setTimeout(r, 800));
-      onSuccess(projectId, triggerResult.jobId);
+      onSuccess(slug, triggerResult.jobId);
       handleClose();
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : 'Upload failed');
