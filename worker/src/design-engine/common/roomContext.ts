@@ -28,7 +28,7 @@ export function getRoomContext(intent: DesignIntent): string {
     if (budget === 'premium') {
       rules.push('BATHROOM FIXTURES: Luxury bathtub permitted as a statement piece, styled to match the theme. Ensure separate wet/dry areas with high-end glass partitions.');
     } else {
-      rules.push('BATHROOM FIXTURES: STRICTLY NO BATHTUBS. Optimize for efficient, modern shower areas with health faucets (bidet sprays). Focus on practical wet/dry separation via floor slope or simple partitions.');
+      rules.push('BATHROOM FIXTURES: STRICTLY NO BATHTUBS. The space must only feature a modern shower area. DO NOT include or suggest a bathtub in any inspiration or layout. Focus on practical wet/dry separation via floor slope or simple glass partitions.');
     }
     rules.push('SAFETY: Mandate anti-skid tiles for all floor surfaces.');
   }
@@ -77,6 +77,7 @@ export function getRoomContext(intent: DesignIntent): string {
   // 6. Generic Constraint Blending
   // ===========================================
   if (budget === 'economy') {
+    rules.push('PRIORITY: Prioritize must-haves and functionality over purely aesthetic choices; essential elements and durability first.');
     rules.push('MATERIALS: Prioritize cost-effective, high-durability surfaces like vitrified tiles and laminates. Avoid expensive natural stone or intricate manual carvings.');
   } else if (budget === 'premium') {
     rules.push('MATERIALS: Use high-end finishes like Italian marble, solid teak wood, and bespoke hardware.');

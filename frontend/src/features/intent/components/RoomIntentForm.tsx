@@ -10,7 +10,7 @@
 
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, type MouseEvent } from 'react';
 import {
   Box,
   Typography,
@@ -158,6 +158,21 @@ function MultiSelectChips({
     setOpen(false);
   };
 
+  const handleSelectAll = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (disabled) return;
+    const all = options.map((o) => o.value);
+    onChange(maxSelection ? all.slice(0, maxSelection) : all);
+  };
+
+  const handleClearAll = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (disabled) return;
+    onChange([]);
+  };
+
   const getChipColor = (index: number) => {
     return CHIP_COLORS[index % CHIP_COLORS.length];
   };
@@ -226,12 +241,13 @@ function MultiSelectChips({
           </Box>
         )}
       >
-        {/* Header with selection count and Done button */}
+        {/* Header with selection count, select all / clear, and Done */}
         <ListSubheader
+          onMouseDown={(e) => e.stopPropagation()}
           sx={{
             display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
+            flexDirection: 'column',
+            gap: 0.75,
             backgroundColor: 'background.paper',
             borderBottom: 1,
             borderColor: 'divider',
@@ -239,25 +255,51 @@ function MultiSelectChips({
             position: 'sticky',
             top: 0,
             zIndex: 1,
+            lineHeight: 1.2,
           }}
         >
-          <Typography variant="caption" color="text.secondary">
-            {value.length} selected{maxSelection ? ` (max ${maxSelection})` : ''}
-          </Typography>
-          <Button
-            size="small"
-            variant="contained"
-            startIcon={<Done />}
-            onClick={handleClose}
-            sx={{ 
-              minWidth: 80,
-              textTransform: 'none',
-              boxShadow: 'none',
-              '&:hover': { boxShadow: 'none' },
-            }}
-          >
-            Done
-          </Button>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1 }}>
+            <Typography variant="caption" color="text.secondary">
+              {value.length} selected{maxSelection ? ` (max ${maxSelection})` : ''}
+            </Typography>
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<Done />}
+              onClick={handleClose}
+              sx={{
+                minWidth: 80,
+                textTransform: 'none',
+                boxShadow: 'none',
+                '&:hover': { boxShadow: 'none' },
+              }}
+            >
+              Done
+            </Button>
+          </Box>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
+            <Button
+              size="small"
+              variant="text"
+              disabled={disabled || options.length === 0}
+              onClick={handleSelectAll}
+              sx={{ textTransform: 'none', minWidth: 0, px: 0.75 }}
+            >
+              Select all
+            </Button>
+            <Typography variant="caption" color="text.disabled">
+              ·
+            </Typography>
+            <Button
+              size="small"
+              variant="text"
+              disabled={disabled || value.length === 0}
+              onClick={handleClearAll}
+              sx={{ textTransform: 'none', minWidth: 0, px: 0.75 }}
+            >
+              Clear
+            </Button>
+          </Box>
         </ListSubheader>
 
         {options.map((option) => {
@@ -569,14 +611,25 @@ export function RoomIntentForm({
             </Box>
           </Grid>
 
-          <Grid item xs={12} sm={6}>
-            <MultiSelectChips
-              label="Interior Styles"
-              options={INTERIOR_STYLES}
-              value={formData.interiorStyles || []}
-              onChange={(vals) => handleFieldChange('interiorStyles', vals.slice(0, 2))}
-              disabled={disabled}
-            />
+          <Grid item xs={12}>
+            <Typography variant="body2" gutterBottom sx={{ fontWeight: 600 }}>
+              Interior Style
+            </Typography>
+            <RadioGroup
+              row
+              value={formData.interiorStyles?.[0] ?? ''}
+              onChange={(e) => handleFieldChange('interiorStyles', e.target.value ? [e.target.value] : [])}
+            >
+              {INTERIOR_STYLES.map((opt) => (
+                <FormControlLabel
+                  key={opt.value}
+                  value={opt.value}
+                  control={<Radio size="small" disabled={disabled} />}
+                  label={opt.label}
+                  sx={{ mr: 3 }}
+                />
+              ))}
+            </RadioGroup>
           </Grid>
 
           <Grid item xs={12} sm={6}>

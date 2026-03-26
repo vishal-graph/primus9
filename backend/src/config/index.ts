@@ -113,9 +113,53 @@ const configSchema = z.object({
 
 type Config = z.infer<typeof configSchema>;
 
+/**
+ * Cloud Redis often requires TLS. Plain `redis://` to Upstash (etc.) is reset by the server → ECONNRESET.
+ * Auto-upgrade to `rediss://` when the host is a known TLS-only endpoint.
+ */
+function normalizeRedisUrl(url: string): string {
+  const trimmed = url.trim();
+  if (!trimmed.toLowerCase().startsWith('redis://')) {
+    return trimmed;
+  }
+  try {
+    const rest = trimmed.slice('redis://'.length);
+    const hostPart = rest.includes('@') ? rest.split('@')[1] : rest;
+    const host = (hostPart.split(':')[0] || '').toLowerCase();
+    const tlsHosts =
+      host.endsWith('.upstash.io') ||
+      host.endsWith('.redis.cloud') ||
+      host.includes('redns.redis-cloud.com');
+    if (tlsHosts) {
+      return `rediss://${rest}`;
+    }
+  } catch {
+    /* keep original */
+  }
+  return trimmed;
+}
+
 function loadConfig(): Config {
   try {
-    return configSchema.parse({
+    const isQueueWorkerProcess = process.argv.some((arg) =>
+      /(?:^|[\\/])(?:src|dist)[\\/]workers[\\/]index\.(?:ts|js)$/.test(arg)
+    );
+    const nodeEnvRaw = (
+      !process.env.NODE_ENV?.trim() ? 'development' : process.env.NODE_ENV
+    ).toLowerCase();
+    const isDevLike = nodeEnvRaw === 'development' || nodeEnvRaw === 'test';
+    // `npm run dev` sets npm_lifecycle_event=dev even when .env has NODE_ENV=production.
+    const isNpmDevScript = process.env.npm_lifecycle_event === 'dev';
+    // Clerk is not wired into request auth anymore; key is only validated for legacy/env completeness.
+    // Allow local dev / queue worker without CLERK_SECRET_KEY. Real deployments should set a real key.
+    if (
+      !process.env.CLERK_SECRET_KEY &&
+      (isQueueWorkerProcess || isDevLike || isNpmDevScript)
+    ) {
+      process.env.CLERK_SECRET_KEY = isQueueWorkerProcess ? 'worker-no-clerk' : 'dev-no-clerk';
+    }
+
+    const parsed = configSchema.parse({
       // Server
       port: process.env.PORT,
       nodeEnv: process.env.NODE_ENV,
@@ -208,6 +252,13 @@ function loadConfig(): Config {
       // Worker
       workerConcurrency: process.env.WORKER_CONCURRENCY,
     });
+    const redisUrl = normalizeRedisUrl(parsed.redisUrl);
+    // Vision worker handlers read process.env.REDIS_URL; keep in sync with BullMQ (TLS for Upstash).
+    process.env.REDIS_URL = redisUrl;
+    return {
+      ...parsed,
+      redisUrl,
+    };
   } catch (error) {
     console.error('❌ Configuration validation failed:');
     if (error instanceof z.ZodError) {

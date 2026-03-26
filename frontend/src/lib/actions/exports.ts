@@ -6,7 +6,7 @@
 
 'use server';
 
-import { auth } from '@clerk/nextjs/server';
+import { getServerAuthHeaders } from '@/lib/server-auth';
 import { getApiBase } from '@/lib/api-base';
 
 // ============================================
@@ -64,17 +64,16 @@ export async function createMoodboardPdfExport(
   }
 ): Promise<CreateExportResponse> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/exports/moodboard-pdf`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -114,16 +113,15 @@ export async function getExportStatus(
   exportId: string
 ): Promise<GetExportResponse> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/exports/${exportId}`, {
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
     });
 
@@ -158,10 +156,9 @@ export async function getLatestExport(
   type: ExportAssetType = 'MOODBOARD_PDF'
 ): Promise<GetExportResponse> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
@@ -169,7 +166,7 @@ export async function getLatestExport(
       `${getApiBase()}/api/exports/project/${projectId}/latest?type=${type}`,
       {
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': authHeaders!.Authorization,
         },
       }
     );
@@ -201,10 +198,9 @@ export async function getProjectExports(
   projectId: string
 ): Promise<{ success: boolean; data?: ExportAsset[]; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
@@ -212,7 +208,7 @@ export async function getProjectExports(
       `${getApiBase()}/api/exports/project/${projectId}`,
       {
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': authHeaders!.Authorization,
         },
       }
     );

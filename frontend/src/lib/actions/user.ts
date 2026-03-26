@@ -5,7 +5,7 @@
  * Handles profile retrieval, updates, and onboarding
  */
 
-import { auth } from '@clerk/nextjs/server';
+import { getServerAuthHeaders } from '@/lib/server-auth';
 import { getApiBase } from '@/lib/api-base';
 
 export interface UserProfile {
@@ -25,16 +25,15 @@ export interface UserProfile {
 
 export async function getUserProfile(): Promise<{ success: boolean; data?: UserProfile; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/user/profile`, {
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
       cache: 'no-store',
     });
@@ -64,17 +63,16 @@ export async function getUserProfile(): Promise<{ success: boolean; data?: UserP
 
 export async function updateUserProfile(profileData: Partial<UserProfile>): Promise<{ success: boolean; data?: UserProfile; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/user/profile`, {
       method: 'PATCH',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(profileData),
@@ -104,17 +102,16 @@ export interface OnboardingData {
 
 export async function completeOnboarding(data: OnboardingData): Promise<{ success: boolean; data?: UserProfile; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/user/onboarding`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(data),

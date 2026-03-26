@@ -1,11 +1,12 @@
 /**
- * TatvaOps Vision - Room 2D Views Generation Handler
+ * TatvaOps Vision - Room 3D Views Generation Handler (UI: "3D Views")
  *
- * Generates a single top-down bird's-eye view per room (moodboard primary, elevation secondary).
+ * Generates one corner bird's-eye render per room using Gemini WITH reference images:
+ * moodboard (style parity) + full-floor isometric (layout/flow), plus optional enrichment text from floor-plan analysis.
  */
 
 import { Message } from '@aws-sdk/client-sqs';
-import { PrismaClient } from '@prisma/client';
+import { prismaClient as prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
 import { config } from '../config';
 import { validateJobGuardrails } from '../services/plan-guardrails';
@@ -16,7 +17,7 @@ import {
   Room2DViewType,
 } from '../design-engine/room-2d-views';
 
-const prisma = new PrismaClient();
+// Use singleton prisma client from ../lib/prisma
 
 /**
  * Build room context for bird view. No geometry validation.
@@ -148,19 +149,36 @@ export async function handleRoom2DViewsGeneration(
     const isRegeneration = version > 1;
 
     try {
-      await validateJobGuardrails(userId, projectId, 'TWO_D_VIEWS', isRegeneration);
+      const guardrailResult = await validateJobGuardrails(userId, projectId, 'TWO_D_VIEWS', isRegeneration);
+      if (!guardrailResult.allowed) {
+        logger.warn('Plan guardrails validation failed', {
+          jobId,
+          userId,
+          projectId,
+          error: guardrailResult.error,
+        });
+
+        await updateJobStatus(jobId, 'FAILED', {
+          error: {
+            code: 'PLAN_LIMIT_EXCEEDED',
+            message: guardrailResult.error || 'Plan limit exceeded',
+          },
+        });
+
+        return true;
+      }
     } catch (guardrailError: any) {
-      logger.warn('Plan guardrails validation failed', {
+      logger.error({
         jobId,
         userId,
         projectId,
         error: guardrailError.message,
-      });
+      }, 'Unexpected error during guardrail validation');
 
       await updateJobStatus(jobId, 'FAILED', {
         error: {
-          code: 'PLAN_LIMIT_EXCEEDED',
-          message: guardrailError.message || 'Plan limit exceeded',
+          code: 'GUARDRAIL_ERROR',
+          message: 'Internal error validating guardrails',
         },
       });
 
@@ -200,6 +218,48 @@ export async function handleRoom2DViewsGeneration(
       });
     }
 
+    let isometricSignedUrl: string | undefined;
+    if (isometricElevation) {
+      if (isometricElevation.s3Key) {
+        try {
+          isometricSignedUrl = await generateSignedUrl(
+            config.s3BucketRenders,
+            isometricElevation.s3Key,
+            3600
+          );
+        } catch (e) {
+          logger.warn('Failed to sign isometric S3 URL, using stored imageUrl', {
+            error: String(e),
+          });
+          isometricSignedUrl = isometricElevation.imageUrl || undefined;
+        }
+      } else {
+        isometricSignedUrl = isometricElevation.imageUrl || undefined;
+      }
+    }
+
+    const meta = (room.metadata || {}) as Record<string, unknown>;
+    const enrichment = meta.enrichment as Record<string, unknown> | undefined;
+    const enrichedSpatialLines: string[] = [];
+    if (enrichment && typeof enrichment === 'object') {
+      if (typeof enrichment.position === 'string' && enrichment.position.trim()) {
+        enrichedSpatialLines.push(`Position on plan: ${enrichment.position.trim()}`);
+      }
+      if (Array.isArray(enrichment.adjacent_to) && enrichment.adjacent_to.length > 0) {
+        enrichedSpatialLines.push(
+          `Adjacent spaces: ${enrichment.adjacent_to.map(String).join(', ')}`
+        );
+      }
+      const op = enrichment.openings as { doors?: number; windows?: number } | undefined;
+      if (op && (op.doors || op.windows)) {
+        enrichedSpatialLines.push(
+          `Openings (from enrichment): ${op.doors ?? 0} door(s), ${op.windows ?? 0} window(s)`
+        );
+      }
+    }
+    const enrichedSpatialNotes =
+      enrichedSpatialLines.length > 0 ? enrichedSpatialLines.join('\n') : undefined;
+
     // No geometry validation. Bird view uses moodboard (primary) + elevation (secondary) only.
     const roomGeometry = buildRoomGeometryForBirdView(room);
 
@@ -219,7 +279,8 @@ export async function handleRoom2DViewsGeneration(
       roomGeometry,
       moodboardUrl,
       connectedRooms,
-      isometricUrl: isometricElevation?.imageUrl ?? undefined,
+      isometricUrl: isometricSignedUrl,
+      enrichedSpatialNotes,
       version,
     });
 
@@ -296,11 +357,11 @@ export async function handleRoom2DViewsGeneration(
       stack: error?.stack,
     };
 
-    logger.error('Room 2D views generation failed', {
+    logger.error({
       requestId,
       jobId,
       error: errorDetails,
-    });
+    }, 'Room 2D views generation failed');
 
     const errorMessage = String(error?.message || '');
     const isRetryable = !(
@@ -346,10 +407,10 @@ async function updateJobStatus(
       },
     });
   } catch (error) {
-    logger.error('Failed to update job status', {
+    logger.error({
       jobId,
       status,
       error: String(error),
-    });
+    }, 'Failed to update job status');
   }
 }

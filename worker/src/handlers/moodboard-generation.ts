@@ -19,7 +19,6 @@
  */
 
 import { Message } from '@aws-sdk/client-sqs';
-import { PrismaClient } from '@prisma/client';
 import {
   generateMoodboard,
   MoodboardJobInput,
@@ -36,12 +35,15 @@ import {
   RoomContext,
 } from '../design-engine/moodboard/intentMapper';
 import { logger } from '../lib/logger';
+import { getPrisma } from '../lib/prisma';
 
 // ===========================================
-// Database Client
+// Database Client (singleton to avoid exhausting DB connection pool)
 // ===========================================
 
-const prisma = new PrismaClient();
+function prisma() {
+  return getPrisma();
+}
 
 // ===========================================
 // Job Payload Type
@@ -66,7 +68,7 @@ const prisma = new PrismaClient();
  * {
  *   "jobId": "uuid",
  *   "intentPayload": {
- *     "interiorStyles": ["modern"],
+ *     "interiorStyles": ["indian-traditional"],
  *     "mood": "warm-cozy",
  *     ...
  *   },
@@ -227,7 +229,7 @@ export async function handleMoodboardGeneration(
       });
 
       // Fetch Intent Graph from database
-      const intentGraph = await prisma.intentGraph.findUnique({
+      const intentGraph = await prisma().intentGraph.findUnique({
         where: { id: payload.intentGraphId },
       });
 
@@ -419,7 +421,7 @@ async function updateJobStatus(
   data?: { result?: object; error?: object }
 ): Promise<void> {
   try {
-    await prisma.aIJob.update({
+    await prisma().aIJob.update({
       where: { id: jobId },
       data: {
         status,
@@ -467,7 +469,7 @@ async function storeAssetVersion(params: {
     const s3Bucket = process.env.AWS_S3_MOODBOARD_BUCKET || 'tatvaops-moodboards';
     
     // Use upsert to handle version conflicts (regeneration)
-    await prisma.assetVersion.upsert({
+    await prisma().assetVersion.upsert({
       where: {
         projectId_roomId_assetType_version: {
           projectId,
@@ -511,7 +513,7 @@ async function storeAssetVersion(params: {
 
     // Mark previous versions as not latest
     if (version > 1) {
-      await prisma.assetVersion.updateMany({
+      await prisma().assetVersion.updateMany({
         where: {
           projectId,
           roomId,
@@ -565,7 +567,7 @@ async function storeMoodboardInRoom(params: {
 
   try {
     // Use upsert to handle regeneration (same room + version)
-    await prisma.roomMoodboard.upsert({
+    await prisma().roomMoodboard.upsert({
       where: {
         roomId_version: {
           roomId,
@@ -616,8 +618,8 @@ async function storeMoodboardInRoom(params: {
 // ===========================================
 
 /**
- * Cleanup database connection on shutdown.
+ * Cleanup (no-op when using shared Prisma singleton; connection is managed by worker lifecycle).
  */
 export async function cleanupMoodboardHandler(): Promise<void> {
-  await prisma.$disconnect();
+  // Do not disconnect: we use getPrisma() singleton shared across handlers.
 }

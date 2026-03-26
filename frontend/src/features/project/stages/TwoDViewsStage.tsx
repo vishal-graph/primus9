@@ -1,5 +1,5 @@
 /**
- * TatvaOps Vision - 2D Views Stage
+ * TatvaOps Vision - 3D Views Stage
  *
  * Single corner bird's-eye view per room (~280–300° from one corner; moodboard primary, elevation secondary).
  */
@@ -258,7 +258,7 @@ export function TwoDViewsStage({ projectId }: TwoDViewsStageProps) {
     <Box sx={{ p: { xs: 2, md: 4 }, height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <Typography variant="h5" fontWeight={600} gutterBottom>
-          2D Views
+          3D Views
         </Typography>
         <Box sx={{ textAlign: 'right' }}>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>

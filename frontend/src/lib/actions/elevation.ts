@@ -15,7 +15,7 @@
 
 'use server';
 
-import { auth } from '@clerk/nextjs/server';
+import { getServerAuthHeaders } from '@/lib/server-auth';
 import { getApiBase } from '@/lib/api-base';
 
 // ============================================
@@ -82,16 +82,15 @@ export async function getProjectElevations(
   projectId: string
 ): Promise<{ success: boolean; elevations?: RoomElevation[]; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/projects/${projectId}/elevations`, {
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
     });
 
@@ -118,10 +117,9 @@ export async function getRoomElevations(
   roomId: string
 ): Promise<{ success: boolean; elevations?: RoomElevation[]; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
@@ -129,7 +127,7 @@ export async function getRoomElevations(
       `${getApiBase()}/api/projects/${projectId}/rooms/${roomId}/elevations`,
       {
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': authHeaders!.Authorization,
         },
       }
     );
@@ -163,17 +161,16 @@ export async function triggerRoomElevationGeneration(
   version?: number
 ): Promise<{ success: boolean; jobId?: string; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/jobs`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -217,10 +214,9 @@ export async function triggerAllRoomElevations(
   jobs?: { roomId: string; jobId: string }[]; 
   errors?: { roomId: string; error: string }[];
 }> {
-  const { getToken } = await auth();
-  const token = await getToken();
+  const authHeaders = await getServerAuthHeaders();
 
-  if (!token) {
+    if (!authHeaders) {
     return { success: false, errors: [{ roomId: 'all', error: 'Not authenticated' }] };
   }
 
@@ -233,7 +229,7 @@ export async function triggerAllRoomElevations(
       const response = await fetch(`${getApiBase()}/api/jobs`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': authHeaders!.Authorization,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -286,16 +282,15 @@ export async function getElevationJobStatus(
   jobId: string
 ): Promise<{ success: boolean; status?: ElevationJob['status']; progress?: number; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/jobs/${jobId}`, {
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
     });
 
@@ -322,10 +317,9 @@ export async function getActiveElevationJobs(
   projectId: string
 ): Promise<{ success: boolean; jobs?: ElevationJob[]; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
@@ -333,7 +327,7 @@ export async function getActiveElevationJobs(
       `${getApiBase()}/api/jobs?projectId=${projectId}&type=ELEVATION&status=QUEUED,PROCESSING`,
       {
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': authHeaders!.Authorization,
         },
       }
     );
@@ -375,10 +369,9 @@ export async function getIsometricElevation(
   floor: number = 1
 ): Promise<{ success: boolean; elevation?: IsometricElevation | null; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
@@ -386,7 +379,7 @@ export async function getIsometricElevation(
       `${getApiBase()}/api/projects/${projectId}/isometric/latest?floor=${floor}`,
       {
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': authHeaders!.Authorization,
         },
       }
     );
@@ -413,10 +406,9 @@ export async function getAllIsometricElevations(
   projectId: string
 ): Promise<{ success: boolean; elevations?: IsometricElevation[]; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
@@ -424,7 +416,7 @@ export async function getAllIsometricElevations(
       `${getApiBase()}/api/projects/${projectId}/isometric`,
       {
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': authHeaders!.Authorization,
         },
       }
     );
@@ -456,17 +448,16 @@ export async function triggerIsometricGeneration(
   version?: number
 ): Promise<{ success: boolean; jobId?: string; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/jobs`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -503,17 +494,16 @@ export async function cancelIsometricJob(
   jobId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/jobs/${jobId}/cancel`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
     });
 
@@ -539,10 +529,9 @@ export async function getActiveIsometricJobs(
   projectId: string
 ): Promise<{ success: boolean; jobs?: IsometricJob[]; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
@@ -550,7 +539,7 @@ export async function getActiveIsometricJobs(
       `${getApiBase()}/api/jobs?projectId=${projectId}&type=INTERIOR_ISOMETRIC&status=QUEUED,PROCESSING`,
       {
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': authHeaders!.Authorization,
         },
       }
     );

@@ -14,7 +14,8 @@
  * CRITICAL: This handler must be idempotent and retry-safe.
  */
 
-import { PrismaClient, AIJobStatus, AIJobType, RoomStatus as DBRoomStatus, RoomType } from '@prisma/client';
+import { AIJobStatus, AIJobType, RoomStatus as DBRoomStatus, RoomType } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 import { Message } from '@aws-sdk/client-sqs';
 import {
   analyzeFloorPlan,
@@ -23,10 +24,13 @@ import {
   FloorPlanAnalysisError,
   FloorPlanErrorCode,
   RoomStatus,
+  fetchImage,
 } from '../design-engine/floorplan';
+import { mapAdjacentIdsToLabels } from '../design-engine/floorplan/enrichment';
 import { logger } from '../lib/logger';
 import { config } from '../config';
 import { redisClient } from '../lib/redis-client';
+import { disconnectWorkerPrisma, getPrisma } from '../lib/prisma';
 
 // Helper to report progress
 async function reportProgress(jobId: string, progress: number, stage: string, message: string) {
@@ -63,19 +67,6 @@ interface HandlerResult {
   roomCount?: number;
   error?: string;
   isRetryable?: boolean;
-}
-
-// ============================================
-// PRISMA CLIENT
-// ============================================
-
-let prisma: PrismaClient | null = null;
-
-function getPrisma(): PrismaClient {
-  if (!prisma) {
-    prisma = new PrismaClient();
-  }
-  return prisma;
 }
 
 // ============================================
@@ -215,6 +206,92 @@ export async function handleFloorPlanAnalysis(
     await storeAnalysisResult(db, projectId, result);
     
     // ========================================
+    // 5. Spatial Enrichment (non-blocking)
+    // ========================================
+    await reportProgress(jobId, 92, 'Enriching', 'Extracting spatial intelligence...');
+    try {
+      const { enrichFloorPlan } = await import('../design-engine/floorplan/enrichment');
+      
+      // Fetch the floor plan image for enrichment
+      const { buffer: imgBuffer, mimeType: imgMime } = await fetchImage(
+        payload.imageUrl,
+        payload.imageBase64,
+        payload.mimeType
+      );
+      const imgBase64 = imgBuffer.toString('base64');
+      
+      const enrichment = await enrichFloorPlan(imgBase64, imgMime, result);
+      
+      if (enrichment) {
+        // Store enrichment data on project metadata
+        const existingProject = await db.project.findUnique({ where: { id: projectId } });
+        const existingMeta = (existingProject?.metadata as Record<string, unknown>) || {};
+        
+        await db.project.update({
+          where: { id: projectId },
+          data: {
+            metadata: {
+              ...existingMeta,
+              floorPlanAnalysis: {
+                ...((existingMeta.floorPlanAnalysis as Record<string, unknown>) || {}),
+                spatialEnrichment: enrichment,
+              },
+            } as any,
+            updatedAt: new Date(),
+          },
+        });
+        
+        // Update individual rooms with enrichment data
+        const dbRooms = await db.room.findMany({ where: { projectId } });
+        for (const enrichedRoom of enrichment.rooms) {
+          const dbRoom =
+            dbRooms.find((r) => {
+              const meta = (r.metadata as Record<string, unknown>) || {};
+              return meta.detectionTempId === enrichedRoom.id;
+            }) ||
+            dbRooms.find(
+              (r) =>
+                r.name?.toLowerCase().includes(enrichedRoom.name?.toLowerCase() || '') ||
+                (enrichedRoom.name?.toLowerCase() || '').includes(r.name?.toLowerCase() || '')
+            );
+          if (dbRoom) {
+            const roomMeta = (dbRoom.metadata as Record<string, unknown>) || {};
+            await db.room.update({
+              where: { id: dbRoom.id },
+              data: {
+                metadata: {
+                  ...roomMeta,
+                  enrichment: {
+                    dimensions: enrichedRoom.dimensions,
+                    area_sqft: enrichedRoom.area_sqft,
+                    wall_thickness_ft: enrichedRoom.wall_thickness_ft,
+                    openings: enrichedRoom.openings,
+                    position: enrichedRoom.position,
+                    adjacent_to: enrichedRoom.adjacent_to,
+                    confidence: enrichedRoom.confidence,
+                    source: enrichedRoom.source,
+                  },
+                } as any,
+              },
+            });
+          }
+        }
+        
+        logger.info('Spatial enrichment stored', {
+          jobId,
+          enrichedRoomCount: enrichment.rooms.length,
+          propertyArea: enrichment.property.total_area_sqft,
+        });
+      }
+    } catch (enrichError) {
+      // Non-fatal — log and continue
+      logger.warn('Spatial enrichment failed (non-fatal)', {
+        jobId,
+        error: enrichError instanceof Error ? enrichError.message : String(enrichError),
+      });
+    }
+    
+    // ========================================
     // 6. Update job status to COMPLETED
     // ========================================
     await db.aIJob.update({
@@ -339,6 +416,10 @@ async function storeAnalysisResult(
     
     // Insert new rooms
     for (const detectedRoom of result.rooms) {
+      const adjacentLabels = mapAdjacentIdsToLabels(
+        detectedRoom.adjacentRooms || [],
+        result.rooms
+      );
       await tx.room.create({
         data: {
           projectId,
@@ -353,7 +434,8 @@ async function storeAnalysisResult(
             reasoning: detectedRoom.reasoning,
             areaEstimate: detectedRoom.areaEstimate,
             areaUnit: detectedRoom.areaUnit,
-            adjacentRooms: detectedRoom.adjacentRooms,
+            adjacentRooms: adjacentLabels,
+            detectionTempId: detectedRoom.tempId,
             detectionSource: detectedRoom.detectionSource,
             analysisVersion: result.analysisVersion,
           },
@@ -378,6 +460,9 @@ async function storeAnalysisResult(
         updatedAt: new Date(),
       },
     });
+  }, {
+    maxWait: 10000, // 10s wait connecting
+    timeout: 30000, // 30s timeout executing
   });
   
   logger.info('Analysis result stored', {
@@ -399,14 +484,9 @@ function mapRoomTypeToDb(type: string): string {
 // CLEANUP
 // ============================================
 
-/**
- * Close database connection
- */
+/** Close shared worker DB pool (e.g. graceful shutdown). */
 export async function cleanup(): Promise<void> {
-  if (prisma) {
-    await prisma.$disconnect();
-    prisma = null;
-  }
+  await disconnectWorkerPrisma();
 }
 
 // ============================================

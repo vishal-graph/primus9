@@ -23,7 +23,10 @@ export interface Room2DViewInput {
   roomGeometry: RoomElevationGeometry;
   moodboardUrl: string;
   connectedRooms: string[];
+  /** Full-floor isometric / interior elevation — locate room, flow, adjacency */
   isometricUrl?: string;
+  /** Optional text from floor-plan spatial enrichment (position, adjacency, openings) */
+  enrichedSpatialNotes?: string;
   designIntent?: DesignIntent;
   version?: number;
 }

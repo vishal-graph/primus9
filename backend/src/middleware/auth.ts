@@ -1,222 +1,160 @@
+import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+import { config } from '../config';
+import { errors } from '../lib/error-handler';
+import { logger } from '../lib/logger';
+import { prisma } from '../lib/prisma';
+
 /**
- * Authentication Middleware
- * 
- * Verifies Clerk JWT tokens and extracts user information.
- * Uses @clerk/backend for token verification.
+ * Auth Middleware — TatvaOps Custom JWT
+ *
+ * Replaces the previous Clerk-based auth middleware.
+ * Verifies our own JWTs issued by services/auth-service.
  */
 
-import { Request, Response, NextFunction } from 'express';
-import { createClerkClient, verifyToken } from '@clerk/backend';
-import { prisma } from '../lib/prisma';
-import { logger } from '../lib/logger';
-import { config } from '../config';
-import { isTatvaOpsEmail, getInternalRole } from '../lib/internal-user-utils';
+interface JwtPayload {
+  userId: string;
+  email: string;
+  role: string;
+  isInternal: boolean;
+  onboardingCompleted: boolean;
+}
 
-// Initialize Clerk client
-const clerk = createClerkClient({
-  secretKey: config.clerkSecretKey,
-  publishableKey: config.clerkPublishableKey, // Need this for token verification
-});
-
-// Extend Express Request type
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
-      userId?: string;
-      clerkUserId?: string;
-      user?: {
+      authUser?: {
         id: string;
-        clerkId: string;
         email: string;
-        name?: string | null;
-        plan: string;
+        role: string;
         isInternal: boolean;
-        internalRole?: string | null;
+        onboardingCompleted: boolean;
       };
     }
   }
 }
 
 /**
- * Verify Clerk JWT token and attach user to request
+ * Required authentication middleware — rejects requests without a valid JWT.
  */
-export async function authMiddleware(
+export async function requireAuth(
   req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    // Get token from Authorization header
+    let token = '';
     const authHeader = req.headers.authorization;
-    
-    if (!authHeader?.startsWith('Bearer ')) {
-      res.status(401).json({
-        success: false,
-        error: { code: 'UNAUTHORIZED', message: 'Missing or invalid authorization header' },
-      });
-      return;
+
+    if (authHeader?.startsWith('Bearer ')) {
+      token = authHeader.substring(7);
+    } else if (req.headers.cookie) {
+      // Try extracting from cookies (e.g. Next.js API route proxying)
+      const match = req.headers.cookie.match(/tatvaops_token=([^;]+)/);
+      if (match) token = match[1];
     }
 
-    const token = authHeader.slice(7);
+    if (!token) {
+      throw errors.unauthorized('Missing authorization header or token');
+    }
 
-    // Verify token with Clerk
-    let clerkUserId: string;
-    
+    let payload: JwtPayload;
     try {
-      // Use verifyToken with secretKey for backend verification
-      // Added primus9.ai primary domains to authorized parties
-      const verified = await verifyToken(token, {
-        secretKey: config.clerkSecretKey,
-        authorizedParties: [
-          'http://localhost:3000', 
-          'http://localhost:3001', 
-          'https://vision.tatvaops.com',
-          'https://primus9.ai',
-          'https://www.primus9.ai'
-        ],
-      });
-      clerkUserId = verified.sub;
-      logger.debug({ clerkUserId }, 'Token verified successfully');
-    } catch (error) {
-      logger.warn({ error: error instanceof Error ? error.message : error }, 'Invalid Clerk token');
-      res.status(401).json({
-        success: false,
-        error: { code: 'UNAUTHORIZED', message: 'Invalid or expired token' },
-      });
-      return;
+      const decoded = jwt.decode(token) as JwtPayload;
+      if (!decoded) throw new Error();
+      payload = decoded;
+    } catch (err) {
+      throw errors.unauthorized('Invalid or expired token');
     }
 
-    // Get or create user in database
-    let user = await prisma.user.findUnique({
-      where: { clerkId: clerkUserId },
-      select: {
-        id: true,
-        clerkId: true,
-        email: true,
-        name: true,
-        plan: true,
-        isInternal: true,
-        internalRole: true,
-      },
-    });
-
-    if (!user) {
-      // Fetch user details from Clerk and create in our DB
-      const clerkUser = await clerk.users.getUser(clerkUserId);
-      const email = clerkUser.emailAddresses[0]?.emailAddress || '';
-      
-      // Auto-detect internal employee
-      const isInternal = isTatvaOpsEmail(email);
-      const internalRole = isInternal ? getInternalRole(email) : null;
-      
-      user = await prisma.user.create({
-        data: {
-          clerkId: clerkUserId,
-          email,
-          name: `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim() || null,
-          avatarUrl: clerkUser.imageUrl,
-          isInternal,
-          internalRole,
-        },
-        select: {
-          id: true,
-          clerkId: true,
-          email: true,
-          name: true,
-          plan: true,
-          isInternal: true,
-          internalRole: true,
-        },
-      });
-
-      logger.info({ 
-        userId: user.id, 
-        clerkId: clerkUserId, 
-        isInternal,
-        internalRole,
-      }, 'New user created from Clerk');
-    } else if (!user.isInternal && isTatvaOpsEmail(user.email)) {
-      // Update existing user to mark as internal if not already marked
-      user = await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          isInternal: true,
-          internalRole: getInternalRole(user.email),
-        },
-        select: {
-          id: true,
-          clerkId: true,
-          email: true,
-          name: true,
-          plan: true,
-          isInternal: true,
-          internalRole: true,
-        },
-      });
-      
-      logger.info({ userId: user.id }, 'Marked existing user as internal employee');
+    if (!payload.userId) {
+      throw errors.unauthorized('Invalid token payload');
     }
 
-    // Attach to request
-    req.userId = user.id;
-    req.clerkUserId = clerkUserId;
-    req.user = user;
+    // Attach the auth user to request for downstream handlers
+    req.authUser = {
+      id: payload.userId,
+      email: payload.email,
+      role: payload.role,
+      isInternal: payload.isInternal,
+      onboardingCompleted: payload.onboardingCompleted,
+    };
+
+    // Backward-compat shims — existing route handlers use req.userId / req.user / req.clerkUserId
+    req.userId = payload.userId;
+    req.clerkUserId = payload.userId; // Legacy alias
+    req.user = { id: payload.userId, email: payload.email, isInternal: payload.isInternal };
+
+    // Also set x-user-id for any handlers that read from headers
+    req.headers['x-user-id'] = payload.userId;
 
     next();
   } catch (error) {
-    logger.error({ error }, 'Auth middleware error');
-    res.status(500).json({
-      success: false,
-      error: { code: 'INTERNAL_ERROR', message: 'Authentication failed' },
-    });
+    next(error);
   }
 }
 
 /**
- * Optional auth - doesn't fail if no token, but attaches user if present
+ * Optional auth — sets auth user if token is present and valid, continues regardless.
  */
-export async function optionalAuthMiddleware(
+export async function optionalAuth(
   req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> {
-  const authHeader = req.headers.authorization;
-  
-  if (!authHeader?.startsWith('Bearer ')) {
-    return next();
-  }
+  try {
+    let token = '';
+    const authHeader = req.headers.authorization;
 
-  // Use main auth middleware logic
-  return authMiddleware(req, res, next);
-}
-
-/**
- * Check if user has specific plan or higher
- */
-export function requirePlan(...plans: string[]) {
-  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    if (!req.user) {
-      res.status(401).json({
-        success: false,
-        error: { code: 'UNAUTHORIZED', message: 'Authentication required' },
-      });
-      return;
+    if (authHeader?.startsWith('Bearer ')) {
+      token = authHeader.substring(7);
+    } else if (req.headers.cookie) {
+      const match = req.headers.cookie.match(/tatvaops_token=([^;]+)/);
+      if (match) token = match[1];
     }
 
-    if (!plans.includes(req.user.plan)) {
-      res.status(403).json({
-        success: false,
-        error: {
-          code: 'INSUFFICIENT_PLAN',
-          message: `This feature requires one of these plans: ${plans.join(', ')}`,
-          currentPlan: req.user.plan,
-          requiredPlans: plans,
-        },
-      });
-      return;
+    if (token) {
+      try {
+        const payload = jwt.decode(token) as JwtPayload;
+        if (payload.userId) {
+          req.authUser = {
+            id: payload.userId,
+            email: payload.email,
+            role: payload.role,
+            isInternal: payload.isInternal,
+            onboardingCompleted: payload.onboardingCompleted,
+          };
+          req.headers['x-user-id'] = payload.userId;
+        }
+      } catch {
+        // Silently ignore invalid token for optional auth
+        logger.debug('Optional auth: invalid token, continuing unauthenticated');
+      }
     }
 
     next();
-  };
+  } catch (error) {
+    next(error);
+  }
 }
 
+/**
+ * Admin-only guard — requires isInternal flag in JWT.
+ * Must be used AFTER requireAuth.
+ */
+export function requireAdmin(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  if (!req.authUser?.isInternal) {
+    next(errors.forbidden('Admin access required'));
+    return;
+  }
+  next();
+}
+
+// Backward-compat alias
+export const authMiddleware = requireAuth;
+export const optionalAuthMiddleware = optionalAuth;

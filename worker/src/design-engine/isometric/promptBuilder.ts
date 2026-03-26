@@ -100,6 +100,23 @@ function composePrompt(
   lines.push('Generate a photorealistic, high-quality isometric interior elevation showing the ENTIRE floor plan from a bird\'s-eye view with a cutaway (roof removed).');
   lines.push('The output must be a fully rendered image with realistic materials, textures, and furniture - NOT a line drawing or schematic.');
   lines.push('');
+  lines.push('PHOTOREALISM (LIKE A REAL PHOTOGRAPH):');
+  lines.push('- Output must look like a photograph of a real furnished apartment or architectural scale model — could be mistaken for a real photo. NOT illustration, NOT game art, NOT Pixar/cel-shaded look.');
+  lines.push('- Believable materials: matte wood grain, fabric texture, natural stone/tile — avoid plastic sheen, oversaturated colors, and toy-like gloss.');
+  lines.push('- Natural daylight only; soft shadows; no dramatic studio lighting or fantasy glow.');
+  lines.push('- Professional arch-viz (Corona/V-Ray quality) or high-end real estate listing photograph aesthetic.');
+  lines.push('- Wall outlines, room shapes, and openings must match the supplied floor plan reference images as closely as the model allows.');
+  lines.push('');
+  lines.push('CLARITY (SHARP AND READABLE):');
+  lines.push('- Sharp focus throughout — no blur, no depth-of-field. Every room must be clearly readable.');
+  lines.push('- High contrast and crisp edges; avoid soft or illustrated edges.');
+  lines.push('- Well-lit, even illumination so all spaces are visible and clear.');
+  lines.push('');
+  lines.push('FURNITURE DENSITY:');
+  lines.push('- Place essential furniture only; leave clear circulation paths.');
+  lines.push('- Avoid overcrowding; each piece should read as real furniture, not decorative filler.');
+  lines.push('- Rooms should feel livable and proportional, not packed.');
+  lines.push('');
 
   // ===========================================
   // CRITICAL REQUIREMENTS
@@ -122,13 +139,13 @@ function composePrompt(
   if (indianContext) {
     lines.push(indianContext);
   } else {
-    lines.push('12. The entire 3D model MUST look like a traditional or modern Indian home in a tropical climate.');
-    lines.push('13. Use Indian flooring (Marble, Vitrified Tiles, Terrazzo, Kota Stone). NO wall-to-wall carpets or distressed rustic wood.');
-    lines.push('14. If a Hall/Living Room is shown, it connects organically to Dining/Kitchen spaces. Include communal seating (diwans, large sofas) and integrated Pooja/Mandir spaces or prominent TV units.');
-    lines.push('15. Kitchens MUST be Indian style (e.g., granite/quartz tops, heavy-duty sinks, closed lofts, no western-style open shelving).');
-    lines.push('16. Bathrooms MUST show Indian wet/dry separation (slope or glass) and health faucets.');
-    lines.push('17. ALL Balconies/Utility areas must have practical functional setups (washing machines, terracotta pots, drying racks).');
-    lines.push('18. Show Indian tropical aesthetics: Ceiling fans in EVERY major room, Jali (lattice) partitions, block print textiles, teak/sheesham wood.');
+    lines.push('The space should feel like a real Indian home — modern or traditional — rendered as a professional architectural photograph, not illustration.');
+    lines.push('12. Use Indian flooring (Marble, Vitrified Tiles, Terrazzo, Kota Stone). NO wall-to-wall carpets or distressed rustic wood.');
+    lines.push('13. If a Hall/Living Room is shown, it connects organically to Dining/Kitchen. Include communal seating and integrated Pooja/Mandir or prominent TV units.');
+    lines.push('14. Kitchens MUST be Indian style (granite/quartz tops, heavy-duty sinks, closed lofts, no western-style open shelving).');
+    lines.push('15. Bathrooms MUST show Indian wet/dry separation (slope or glass) and health faucets.');
+    lines.push('16. Balconies/Utility areas: practical functional setups (washing machines, planters, drying racks).');
+    lines.push('17. Indian tropical context: ceiling fans, teak/sheesham wood — rendered realistically, not theatrically.');
   }
   lines.push('');
 
@@ -176,10 +193,10 @@ function composePrompt(
   lines.push('-'.repeat(40));
   lines.push('');
   lines.push('Visual Style:');
-  lines.push('- Real-estate marketing quality');
-  lines.push('- Architectural presentation grade');
-  lines.push('- NOT gaming/cinematic render');
-  lines.push('- NOT artistic interpretation');
+  lines.push('- Real-estate / arch-viz marketing quality — believable real space');
+  lines.push('- Architectural presentation grade faithful to the floor plan');
+  lines.push('- NOT gaming/cinematic/cartoon render; NOT illustration or concept art');
+  lines.push('- NOT artistic interpretation that changes layout or proportions');
   lines.push('');
   lines.push('Technical Requirements:');
   lines.push('- Sharp edges and clean lines');
@@ -240,7 +257,9 @@ function buildProhibitionsList(): string[] {
     // Style prohibitions
     'Do NOT add furniture that exceeds room bounds',
     'Do NOT obscure room boundaries with décor',
-    'Do NOT use cinematic or gaming render style',
+    'Do NOT use cinematic, gaming, cartoon, or toy-like stylized render',
+    'Do NOT use illustrated, concept-art, or 3D game aesthetic',
+    'Do NOT render furniture or materials with toy-like or plastic appearance',
     'Do NOT add text, labels, annotations, or dimensions',
     'Do NOT use "blueprint" or "sketch" style',
     
@@ -366,15 +385,21 @@ ${geometry.rooms.map(r => `• ${r.roomName} at (${r.boundingBox.x}, ${r.boundin
 Room Styling (apply to each room):
 ${roomStyleList}
 
-${designIntent ? getRoomContext(designIntent) : ''}
+${designIntent ? getRoomContext(designIntent) : `INDIAN CONTEXT: The space should feel like a real Indian home (modern or traditional) rendered as a professional architectural photograph — Indian flooring, functional kitchen/bathroom, practical balcony. Rendered realistically, not theatrically.`}
+
+PHOTOREALISM: Output must look like a photograph of a real furnished apartment or architectural scale model — could be mistaken for a real photo. NOT cartoon, NOT game asset, NOT illustration, NOT oversaturated plastic look. Believable materials (matte wood, fabric, stone); natural daylight; subtle shadows.
+
+CLARITY: Sharp focus throughout (no blur). High contrast, crisp edges. Well-lit so every room is readable. Like a high-resolution architectural photograph or real estate listing.
+
+FURNITURE DENSITY: Place essential furniture only; leave clear circulation. Avoid overcrowding. Rooms should feel livable, not packed.
 
 RENDERING REQUIREMENTS:
 1. ✅ MATCH the layout image positions EXACTLY
 2. ✅ Isometric/bird's-eye view angle (~30° tilt)
 3. ✅ Cutaway view (roof removed, walls visible)
-4. ✅ Photorealistic materials and textures
+4. ✅ Photorealistic materials and textures (matte/satin surfaces, real wood/stone — avoid toy-like gloss)
 5. ✅ Furniture placed within room boundaries
-6. ✅ Soft natural lighting
+6. ✅ Soft natural lighting only
 7. ✅ White/neutral background
 8. ✅ 4K resolution
 
@@ -386,6 +411,8 @@ ABSOLUTE PROHIBITIONS:
 ❌ DO NOT add/remove walls
 ❌ DO NOT use perspective distortion
 ❌ DO NOT omit any rooms
+❌ DO NOT use illustrated, concept-art, or 3D game aesthetic
+❌ DO NOT render furniture with toy-like or plastic appearance
 
 The generated image MUST be a 3D representation of the EXACT layout shown in the first reference image. The layout is the SOURCE OF TRUTH - do not deviate from it.
 
@@ -432,6 +459,8 @@ export function buildSimplifiedPrompt(
 
   return `Create a photorealistic isometric/bird's-eye 3D interior floor plan elevation showing a cutaway view (roof removed).
 
+Output must look like a photograph of a real furnished apartment — could be mistaken for a real photo. NOT cartoon, illustration, or stylized 3D game art. Sharp focus throughout (no blur); crisp edges; well-lit. Place essential furniture only; avoid overcrowding.
+
 ⚠️ CRITICAL: FOLLOW THE EXACT FLOOR PLAN GEOMETRY BELOW ⚠️
 The room positions and sizes below are from the ACTUAL floor plan and MUST be followed EXACTLY.
 
@@ -446,15 +475,17 @@ ${roomLayoutDescription}
 ${adjacencyInfo ? `ROOM ADJACENCIES (rooms that share walls/doorways):\n${adjacencyInfo}\n` : ''}
 === END GEOMETRY ===
 
+PHOTOREALISM: Like a photograph of a real apartment — believable materials, natural daylight. NOT illustrated, concept-art, or game aesthetic. Sharp focus; crisp edges; no overcrowding.
+
 RENDERING INSTRUCTIONS:
-1. ⚠️ GEOMETRY IS LAW: Render rooms EXACTLY at the positions and sizes specified above
+1. ⚠️ GEOMETRY IS LAW: Render rooms EXACTLY at the positions and sizes specified above (same topology as the floor plan reference images)
 2. Each room MUST be at its correct (x,y) position relative to other rooms
 3. Room proportions and relative positions MUST match the floor plan exactly
 4. Isometric camera angle (~30° tilt), bird's-eye view
 5. Show ALL ${geometry.rooms.length} rooms in ONE coherent image
 6. Walls visible up to ceiling height (cutaway/roof removed)
-7. Photorealistic materials: wood grain, fabric textures, stone, glass reflections
-8. Soft natural lighting with realistic shadows
+7. Photorealistic materials: subtle wood grain, fabric, stone/tile; avoid plastic sheen and oversaturation
+8. Soft natural lighting with realistic shadows (no cinematic drama)
 9. White/neutral background
 10. 4K resolution minimum
 11. NO perspective distortion
@@ -468,6 +499,8 @@ ABSOLUTE PROHIBITIONS:
 ❌ Do NOT rearrange the room layout
 ❌ Do NOT use perspective camera
 ❌ Do NOT omit any rooms
+❌ Do NOT use illustrated, concept-art, or 3D game aesthetic
+❌ Do NOT render furniture with toy-like or plastic appearance
 
 The generated elevation MUST look like a 3D version of the exact floor plan geometry provided. Accuracy is more important than aesthetics.
 

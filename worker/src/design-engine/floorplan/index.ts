@@ -90,3 +90,10 @@ export {
   PdfPageImage,
   PdfConversionResult,
 } from './pdfToImages';
+
+// Spatial enrichment
+export {
+  enrichFloorPlan,
+  type SpatialEnrichment,
+  type EnrichedRoom,
+} from './enrichment';

@@ -16,12 +16,12 @@
 
 import { Message } from '@aws-sdk/client-sqs';
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
-import { PrismaClient } from '@prisma/client';
 import PDFDocument from 'pdfkit';
 import * as fs from 'fs';
 import * as path from 'path';
 import { config } from '../config';
 import { logger } from '../lib/logger';
+import { getPrisma } from '../lib/prisma';
 
 // ===========================================
 // Logo Loading
@@ -66,11 +66,7 @@ async function getLogoBuffer(): Promise<Buffer | null> {
   return null;
 }
 
-// ===========================================
-// Database Client
-// ===========================================
-
-const prisma = new PrismaClient();
+const prisma = getPrisma();
 
 // ===========================================
 // S3 Client

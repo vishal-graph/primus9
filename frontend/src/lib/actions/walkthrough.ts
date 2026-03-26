@@ -4,7 +4,7 @@
 
 'use server';
 
-import { auth } from '@clerk/nextjs/server';
+import { getServerAuthHeaders } from '@/lib/server-auth';
 import { getApiBase } from '@/lib/api-base';
 
 export interface RoomWalkthroughVideo {
@@ -34,13 +34,12 @@ export async function getRoomWalkthroughs(
   roomId: string
 ): Promise<{ success: boolean; videos?: RoomWalkthroughVideo[]; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
-    if (!token) return { success: false, error: 'Not authenticated' };
+    const headers = await getServerAuthHeaders();
+    if (!headers) return { success: false, error: 'Not authenticated' };
 
     const response = await fetch(
       `${getApiBase()}/api/projects/${projectId}/rooms/${roomId}/walkthroughs`,
-      { headers: { Authorization: `Bearer ${token}` } }
+      { headers }
     );
 
     if (!response.ok) {
@@ -62,13 +61,12 @@ export async function getProjectWalkthroughs(
   projectId: string
 ): Promise<{ success: boolean; videos?: RoomWalkthroughVideo[]; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
-    if (!token) return { success: false, error: 'Not authenticated' };
+    const headers = await getServerAuthHeaders();
+    if (!headers) return { success: false, error: 'Not authenticated' };
 
     const response = await fetch(
       `${getApiBase()}/api/projects/${projectId}/walkthroughs`,
-      { headers: { Authorization: `Bearer ${token}` } }
+      { headers }
     );
 
     if (!response.ok) {
@@ -96,14 +94,13 @@ export async function triggerRoomWalkthroughGeneration(
   version?: number
 ): Promise<{ success: boolean; jobId?: string; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
-    if (!token) return { success: false, error: 'Not authenticated' };
+    const headers = await getServerAuthHeaders();
+    if (!headers) return { success: false, error: 'Not authenticated' };
 
     const response = await fetch(`${getApiBase()}/api/jobs`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        ...headers,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -138,13 +135,12 @@ export async function getActiveWalkthroughJobs(
   projectId: string
 ): Promise<{ success: boolean; jobs?: WalkthroughJob[]; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
-    if (!token) return { success: false, error: 'Not authenticated' };
+    const headers = await getServerAuthHeaders();
+    if (!headers) return { success: false, error: 'Not authenticated' };
 
     const response = await fetch(
       `${getApiBase()}/api/jobs?projectId=${projectId}&type=ROOM_WALKTHROUGH&status=QUEUED,PROCESSING`,
-      { headers: { Authorization: `Bearer ${token}` } }
+      { headers }
     );
 
     if (!response.ok) {

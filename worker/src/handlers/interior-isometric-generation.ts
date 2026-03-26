@@ -29,7 +29,6 @@
 
 import { Message } from '@aws-sdk/client-sqs';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import { PrismaClient } from '@prisma/client';
 import {
   generateIsometricElevation,
   extractFloorGeometry,
@@ -40,12 +39,9 @@ import {
 import { config } from '../config';
 import { logger } from '../lib/logger';
 import { validateJobGuardrails } from '../services/plan-guardrails';
+import { getPrisma } from '../lib/prisma';
 
-// ===========================================
-// Database Client
-// ===========================================
-
-const prisma = new PrismaClient();
+const prisma = getPrisma();
 
 // ===========================================
 // Job Payload Type

@@ -14,6 +14,7 @@
  */
 
 'use client';
+import { getAuthUser } from '@/lib/auth-client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -57,7 +58,6 @@ import { slideFromBottomVariants, staggerContainerVariants, staggerItemVariants 
 import { FeedbackModal } from '@/components/feedback/FeedbackModal';
 import { buildProjectContext } from '@/lib/feedback/build-context';
 import { checkFeedbackExists } from '@/lib/actions/feedback';
-import { useUser } from '@clerk/nextjs';
 import type { ProjectContext } from '@/lib/feedback/feedback-engine';
 import { getApiBase } from '@/lib/api-base';
 import { createMoodboardPdfExport, getExportStatus, ExportAssetStatus } from '@/lib/actions/exports';
@@ -153,8 +153,7 @@ export function MoodboardStage({ projectId, onStageChange }: MoodboardStageProps
   const [jobStartTimes, setJobStartTimes] = useState<Map<string, number>>(new Map()); // jobId -> timestamp
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [feedbackContext, setFeedbackContext] = useState<ProjectContext | null>(null);
-  const { user } = useUser();
-  
+    
   // PDF Export state
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportId, setExportId] = useState<string | null>(null);
@@ -504,6 +503,7 @@ export function MoodboardStage({ projectId, onStageChange }: MoodboardStageProps
     }
 
     // Check if feedback already exists for this project
+    const user = await getAuthUser();
     if (user?.id) {
       const feedbackCheck = await checkFeedbackExists(projectId);
       

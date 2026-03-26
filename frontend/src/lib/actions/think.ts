@@ -10,7 +10,7 @@
  * 4. Poll spatial planning job status
  */
 
-import { auth } from '@clerk/nextjs/server';
+import { getServerAuthHeaders } from '@/lib/server-auth';
 import { getApiBase } from '@/lib/api-base';
 
 // ============================================
@@ -111,8 +111,7 @@ export async function createSpatialPlan(
   error?: string;
 }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
     console.log('[Think] Creating spatial plan', {
       projectId,
@@ -120,7 +119,7 @@ export async function createSpatialPlan(
       options,
     });
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
@@ -128,7 +127,7 @@ export async function createSpatialPlan(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
       body: JSON.stringify({
         projectId,
@@ -181,19 +180,18 @@ export async function getSpatialPlan(
   projectId: string
 ): Promise<{ success: boolean; data?: SpatialPlan; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
     console.log('[Think] Fetching spatial plan', { projectId });
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/think/${projectId}`, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
       cache: 'no-store',
     });
@@ -238,19 +236,18 @@ export async function deleteSpatialPlan(
   projectId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
     console.log('[Think] Deleting spatial plan', { projectId });
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/think/${projectId}`, {
       method: 'DELETE',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
     });
 
@@ -298,17 +295,16 @@ export async function getSpatialPlanningJobStatus(
   error?: string;
 }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/jobs/${jobId}`, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
       cache: 'no-store',
     });

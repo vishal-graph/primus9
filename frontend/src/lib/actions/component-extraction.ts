@@ -15,11 +15,20 @@ export interface ComponentExtractionRow {
   wallLocation: string;
   suggestedBuyLinks: Array<{ label: string; url: string; note?: string }> | string;
   confidence: string;
+  /** BOQ fields (optional for legacy extractions). */
+  pricingType?: string;
+  materialCost?: number | string;
+  labourCost?: number | string;
+  totalCost?: number | string;
+  calculation?: string;
+  notes?: string;
 }
 
 export interface RoomComponentTable {
   roomId: string;
   roomName: string;
+  /** From extraction payload or room.type */
+  roomType?: string;
   rows: ComponentExtractionRow[];
   s3Key?: string;
   version: number;

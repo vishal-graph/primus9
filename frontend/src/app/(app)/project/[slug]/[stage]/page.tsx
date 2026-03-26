@@ -81,7 +81,7 @@ const STAGES: Stage[] = [
   { id: 'intent', label: 'Intent', icon: <Palette />, component: IntentStage },
   { id: 'moodboard', label: 'Moodboard', icon: <CollectionsBookmark />, component: MoodboardStage },
   { id: 'elevation', label: 'Elevations', icon: <ViewInAr />, component: ElevationStage },
-  { id: 'two_d_views', label: '2D Views', icon: <ViewInAr />, component: TwoDViewsStage },
+  { id: 'two_d_views', label: '3D Views', icon: <ViewInAr />, component: TwoDViewsStage },
   { id: 'component', label: 'Components', icon: <Tune />, component: ComponentStage },
   { id: 'room_walkthrough', label: 'Walkthrough', icon: <Videocam />, component: WalkthroughStage },
   { id: 'export', label: 'Export', icon: <Download />, component: ExportStage, comingSoon: true },
@@ -244,7 +244,7 @@ export default function ProjectStagePage({ params }: ProjectStagePageProps) {
                   overflow: 'auto',
                 }}
               >
-                <ActiveStageComponent projectId={projectId} onStageChange={handleStageNavigate} />
+                <ActiveStageComponent projectId={projectId} onStageChange={handleStageNavigate} projectSlug={slug} />
               </Paper>
             </motion.div>
           </AnimatePresence>

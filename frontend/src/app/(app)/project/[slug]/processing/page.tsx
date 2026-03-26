@@ -78,9 +78,11 @@ export default function ProcessingPage({ params }: ProcessingPageProps) {
             setProjectData(data.data);
             
             // If already complete, redirect immediately
-            if (data.data.status === 'COMPLETED') {
+            const isCompleted = data.data.rooms && data.data.rooms.length > 0 && (!data.data.aiJobs || data.data.aiJobs.length === 0);
+            
+            if (isCompleted) {
               router.replace(`/project/${slug}/floor-plan`);
-            } else if (data.data.status === 'FAILED') {
+            } else if (data.data.aiJobs?.[0]?.status === 'FAILED') {
               setStatus('FAILED');
               setError('Floor plan analysis failed during previous attempt.');
             }
@@ -108,7 +110,9 @@ export default function ProcessingPage({ params }: ProcessingPageProps) {
           if (data.success && data.data) {
             const project = data.data;
             
-            if (project.status === 'COMPLETED') {
+            const isCompleted = project.rooms && project.rooms.length > 0 && (!project.aiJobs || project.aiJobs.length === 0);
+            
+            if (isCompleted) {
               setStatus('COMPLETED');
               setProgress(100);
               setCurrentStepIndex(PROCESSING_STEPS.length); // All complete
@@ -119,7 +123,7 @@ export default function ProcessingPage({ params }: ProcessingPageProps) {
               setTimeout(() => {
                 router.replace(`/project/${slug}/floor-plan`);
               }, 2000);
-            } else if (project.status === 'FAILED') {
+            } else if (project.aiJobs?.[0]?.status === 'FAILED') {
               setStatus('FAILED');
               clearInterval(pollIntervalRef.current!);
               setError('Analysis failed. The floor plan image might be too complex or illegible.');

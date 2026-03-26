@@ -14,8 +14,9 @@
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "build:worker": "cd ../worker && npm run build",
-    "queue:worker": "tsx src/workers/index.ts",
-    "queue:worker:build": "npm run build:worker && npm run queue:worker"
+    "queue:worker": "npm run build:worker && tsx src/workers/index.ts",
+    "queue:purge": "tsx scripts/purge-bullmq-queue.ts",
+    "queue:worker:build": "npm run queue:worker"
   },
   "dependencies": {
     "@aws-sdk/client-cloudwatch-logs": "^3.957.0",

@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useAuth } from '@clerk/nextjs';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { getAccessToken } from '@/lib/auth-client';
 import {
   Box,
   Typography,
@@ -17,7 +17,8 @@ import {
   TableRow,
   Stack,
 } from '@mui/material';
-import { Download, AutoAwesome } from '@mui/icons-material';
+import { Download, AutoAwesome, ShoppingCart, Receipt } from '@mui/icons-material';
+import { useRouter } from 'next/navigation';
 import { useAppSelector } from '@/store';
 import { selectRooms } from '@/store/projectSlice';
 import { getRooms } from '@/lib/actions/project';
@@ -29,14 +30,45 @@ import {
   type RoomComponentTable,
 } from '@/lib/actions/component-extraction';
 import { getJobs } from '@/lib/actions/ai-job';
+import { getProjectComponentOrders } from '@/lib/actions/component-orders';
 
 interface ComponentStageProps {
   projectId: string;
+  projectSlug?: string;
 }
 
-export function ComponentStage({ projectId }: ComponentStageProps) {
+function formatInrCell(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—';
+  const n = typeof value === 'number' ? value : Number(String(value).replace(/,/g, ''));
+  if (!Number.isFinite(n)) return '—';
+  return `₹${Math.round(n).toLocaleString('en-IN')}`;
+}
+
+/** Renders `**bold**` segments as <strong> (used for approximate size emphasis). */
+function renderApproximateSizeText(text: string): ReactNode {
+  if (!text.includes('**')) return text;
+  const parts: ReactNode[] = [];
+  const re = /\*\*([^*]+)\*\*/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let key = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) {
+      parts.push(text.slice(last, m.index));
+    }
+    parts.push(<strong key={key++}>{m[1]}</strong>);
+    last = re.lastIndex;
+  }
+  if (last < text.length) {
+    parts.push(text.slice(last));
+  }
+  return parts.length > 0 ? <>{parts}</> : text;
+}
+
+export function ComponentStage({ projectId, projectSlug }: ComponentStageProps) {
+  const router = useRouter();
   const rooms = useAppSelector(selectRooms);
-  const { getToken } = useAuth();
+  // Removed useAuth
   const [roomList, setRoomList] = useState<Room[]>([]);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(rooms[0]?.id || null);
   const [roomTables, setRoomTables] = useState<RoomComponentTable[]>([]);
@@ -44,44 +76,7 @@ export function ComponentStage({ projectId }: ComponentStageProps) {
   const [error, setError] = useState<string | null>(null);
   const [generatingRoomIds, setGeneratingRoomIds] = useState<Set<string>>(new Set());
   const [generatingAll, setGeneratingAll] = useState(false);
-
-  const renderBuyLinks = (
-    links: RoomComponentTable['rows'][number]['suggestedBuyLinks']
-  ) => {
-    if (Array.isArray(links)) {
-      return links.map((link, index) => (
-        <Box key={`${link.url}-${index}`}>
-          <a href={link.url} target="_blank" rel="noreferrer">
-            {link.label || link.url}
-          </a>
-          {link.note ? ` (${link.note})` : ''}
-        </Box>
-      ));
-    }
-
-    if (!links) return null;
-
-    return String(links)
-      .split('|')
-      .map((entry) => entry.trim())
-      .filter(Boolean)
-      .map((entry, index) => {
-        const urlMatch = entry.match(/https?:\/\/\S+/);
-        const url = urlMatch?.[0] || '';
-        const label = url ? entry.replace(url, '').replace(/[-–|]/g, '').trim() : entry;
-        return (
-          <Box key={`${url || entry}-${index}`}>
-            {url ? (
-              <a href={url} target="_blank" rel="noreferrer">
-                {label || url}
-              </a>
-            ) : (
-              label
-            )}
-          </Box>
-        );
-      });
-  };
+  const [roomOrderIds, setRoomOrderIds] = useState<Map<string, string>>(new Map());
 
   const selectedRoomTable = useMemo(
     () => roomTables.find((table) => table.roomId === selectedRoomId) || null,
@@ -110,22 +105,42 @@ export function ComponentStage({ projectId }: ComponentStageProps) {
     }
   }, [roomList, selectedRoomId]);
 
-  const loadComponents = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  /**
+   * Load component tables. Use `silent: true` for background polls so the page does not
+   * flash the full-screen spinner every few seconds while extraction jobs run.
+   */
+  const loadComponents = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     const result = await getProjectComponents(projectId);
     if (!result.success) {
       setError(result.error || 'Failed to load components');
-      setLoading(false);
+      if (!silent) setLoading(false);
       return;
     }
     setRoomTables(result.data?.rooms || []);
-    setLoading(false);
+    setError(null);
+    if (!silent) setLoading(false);
   }, [projectId]);
 
   useEffect(() => {
     loadComponents();
   }, [loadComponents]);
+
+  useEffect(() => {
+    getProjectComponentOrders(projectId).then((res) => {
+      if (res.success && res.data.length > 0) {
+        const latestByRoom = new Map<string, string>();
+        for (const o of res.data) {
+          if (!latestByRoom.has(o.roomId)) latestByRoom.set(o.roomId, o.orderId);
+        }
+        setRoomOrderIds(latestByRoom);
+      }
+    });
+  }, [projectId]);
 
   const syncActiveComponentJobs = useCallback(async () => {
     const jobs = await getJobs({ projectId, type: 'COMPONENT_EXTRACTION', limit: 50 });
@@ -146,16 +161,18 @@ export function ComponentStage({ projectId }: ComponentStageProps) {
     syncActiveComponentJobs();
   }, [projectId, syncActiveComponentJobs]);
 
+  // While any room has QUEUED/PROCESSING extraction, poll quietly (no full-page loading).
+  const POLL_MS = 12_000;
   useEffect(() => {
     if (generatingRoomIds.size === 0) return;
 
     const interval = setInterval(async () => {
       await syncActiveComponentJobs();
-      await loadComponents();
-    }, 8000);
+      await loadComponents({ silent: true });
+    }, POLL_MS);
 
     return () => clearInterval(interval);
-  }, [generatingRoomIds.size, loadComponents, projectId, syncActiveComponentJobs]);
+  }, [generatingRoomIds.size, loadComponents, syncActiveComponentJobs]);
 
   const handleGenerateRoom = async (roomId: string) => {
     setGeneratingRoomIds((prev) => new Set(prev).add(roomId));
@@ -201,7 +218,7 @@ export function ComponentStage({ projectId }: ComponentStageProps) {
   const downloadFile = async (format: 'csv' | 'xlsx') => {
     try {
       const apiBase = getApiBase();
-      const token = await getToken();
+      const token = getAccessToken();
       const response = await fetch(`${apiBase}/api/projects/${projectId}/components?format=${format}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
@@ -233,6 +250,46 @@ export function ComponentStage({ projectId }: ComponentStageProps) {
             </Typography>
           </Box>
           <Stack direction="row" spacing={1}>
+            {projectSlug && selectedRoomId && (
+              <>
+                {roomOrderIds.has(selectedRoomId) ? (
+                  <Button
+                    variant="contained"
+                    startIcon={<Receipt />}
+                    onClick={() =>
+                      router.push(
+                        `/project/${projectSlug}/components/checkout/success?orderId=${roomOrderIds.get(selectedRoomId)}&projectId=${projectId}`
+                      )
+                    }
+                    sx={{
+                      bgcolor: '#22c55e',
+                      color: '#fff',
+                      '&:hover': { bgcolor: '#16a34a' },
+                    }}
+                  >
+                    View Receipt
+                  </Button>
+                ) : (
+                  selectedRoomTable &&
+                  selectedRoomTable.rows.length > 0 && (
+                    <Button
+                      variant="contained"
+                      startIcon={<ShoppingCart />}
+                      onClick={() =>
+                        router.push(`/project/${projectSlug}/components/checkout?roomId=${selectedRoomTable.roomId}`)
+                      }
+                      sx={{
+                        background: 'linear-gradient(90deg, #9333ea 0%, #c084fc 100%)',
+                        color: '#fff',
+                        '&:hover': { background: 'linear-gradient(90deg, #7e22ce 0%, #a855f7 100%)' },
+                      }}
+                    >
+                      Order from Room
+                    </Button>
+                  )
+                )}
+              </>
+            )}
             <Button variant="outlined" startIcon={<Download />} onClick={() => downloadFile('csv')}>
               Download CSV
             </Button>
@@ -246,7 +303,26 @@ export function ComponentStage({ projectId }: ComponentStageProps) {
           {roomList.map((room) => (
             <Chip
               key={room.id}
-              label={room.name}
+              label={
+                <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  {room.name}
+                  {roomOrderIds.has(room.id) && (
+                    <Box
+                      component="span"
+                      sx={{
+                        fontSize: '0.65rem',
+                        bgcolor: 'rgba(34, 197, 94, 0.3)',
+                        color: '#22c55e',
+                        px: 0.5,
+                        py: 0.25,
+                        borderRadius: 1,
+                      }}
+                    >
+                      Ordered
+                    </Box>
+                  )}
+                </Box>
+              }
               onClick={() => setSelectedRoomId(room.id)}
               color={selectedRoomId === room.id ? 'primary' : 'default'}
               variant={selectedRoomId === room.id ? 'filled' : 'outlined'}
@@ -306,7 +382,16 @@ export function ComponentStage({ projectId }: ComponentStageProps) {
         ) : (
           <>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              Buy links are AI-suggested (no live search). Use as best-match references.
+              {selectedRoomTable.roomType ? (
+                <>
+                  Room type: <strong>{selectedRoomTable.roomType.replace(/_/g, ' ')}</strong>.{' '}
+                </>
+              ) : null}
+              Tables combine{' '}
+              <strong>visual component extraction</strong> (materials, placement, sizes) with optional{' '}
+              <strong>BOQ-style costs</strong> (material + labour). Areas are shown in <strong>sq ft</strong>{' '}
+              first; furniture uses <strong>ft / in</strong> where applicable—derived from plan + renders, all{' '}
+              <strong>approximate</strong>; verify on site before ordering or fabrication.
             </Typography>
             <TableContainer component={Paper} variant="outlined">
             <Table size="small">
@@ -317,11 +402,13 @@ export function ComponentStage({ projectId }: ComponentStageProps) {
                   <TableCell>Description</TableCell>
                   <TableCell>Material</TableCell>
                   <TableCell>Finish / Color</TableCell>
-                  <TableCell>Approx Size</TableCell>
+                  <TableCell>Approx. size (sq ft / ft)</TableCell>
                   <TableCell>Placement</TableCell>
-                  <TableCell>Wall Location</TableCell>
-                  <TableCell>Suggested Buy Links</TableCell>
-                  <TableCell>Confidence</TableCell>
+                  <TableCell>Material (₹)</TableCell>
+                  <TableCell>Labour (₹)</TableCell>
+                  <TableCell>Total (₹)</TableCell>
+                  <TableCell>Calculation</TableCell>
+                  <TableCell>Notes</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -332,11 +419,13 @@ export function ComponentStage({ projectId }: ComponentStageProps) {
                     <TableCell>{row.description}</TableCell>
                     <TableCell>{row.material}</TableCell>
                     <TableCell>{row.finishColor}</TableCell>
-                    <TableCell>{row.approximateSize}</TableCell>
+                    <TableCell>{renderApproximateSizeText(row.approximateSize)}</TableCell>
                     <TableCell>{row.placement}</TableCell>
-                    <TableCell>{row.wallLocation}</TableCell>
-                    <TableCell>{renderBuyLinks(row.suggestedBuyLinks)}</TableCell>
-                    <TableCell>{row.confidence}</TableCell>
+                    <TableCell>{formatInrCell(row.materialCost)}</TableCell>
+                    <TableCell>{formatInrCell(row.labourCost)}</TableCell>
+                    <TableCell>{formatInrCell(row.totalCost)}</TableCell>
+                    <TableCell sx={{ maxWidth: 280 }}>{row.calculation || '—'}</TableCell>
+                    <TableCell sx={{ maxWidth: 220 }}>{row.notes || '—'}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

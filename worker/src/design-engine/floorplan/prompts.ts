@@ -33,6 +33,7 @@ CRITICAL RULES:
 3. If you cannot determine a room's type, classify it as "UNCLASSIFIED" - NEVER skip it
 4. Every detected space must have a reasoning explanation
 5. Your output must be valid JSON only - no markdown, no explanations outside JSON
+6. ADJACENCY: In "adjacentRooms" and "adjacencyGraph", include ONLY spaces that share a wall, door, or direct opening — NOT every room on the plan. Most rooms have roughly 0–6 true neighbors; never list all rooms as adjacent to one space.
 
 You will analyze floor plans that may be:
 - Architectural drawings (clean, labeled)

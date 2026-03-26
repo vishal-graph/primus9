@@ -13,8 +13,8 @@
 
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { useUser } from '@clerk/nextjs';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { getAuthUser } from '@/lib/auth-client';
 import { motion } from 'framer-motion';
 import {
   Box,
@@ -55,16 +55,18 @@ const FEATURES = [
 
 export default function LandingPage() {
   const router = useRouter();
-  const { isSignedIn, isLoaded } = useUser();
+  const [ready, setReady] = useState(false);
+  const [isSignedIn, setIsSignedIn] = useState(false);
 
   // Redirect if already signed in — app initial page is /entry
   useEffect(() => {
-    if (isLoaded && isSignedIn) {
-      router.push('/entry');
-    }
-  }, [isLoaded, isSignedIn, router]);
+    getAuthUser().then((user) => {
+      setIsSignedIn(!!user);
+      setReady(true);
+    });
+  }, []);
 
-  if (!isLoaded || isSignedIn) {
+  if (!ready || isSignedIn) {
     return null;
   }
 

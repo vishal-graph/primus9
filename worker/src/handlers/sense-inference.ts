@@ -6,18 +6,14 @@
  */
 
 import { Message } from '@aws-sdk/client-sqs';
-import { PrismaClient } from '@prisma/client';
 import { inferIntent, IntentInferenceInput } from '../design-engine/sense/inferIntent';
 import { InferredIntent } from '../design-engine/sense/responseParser';
 import { DesignEngineError } from '../design-engine/types';
 import { logger } from '../lib/logger';
 import crypto from 'crypto';
+import { getPrisma } from '../lib/prisma';
 
-// ============================================
-// DATABASE CLIENT
-// ============================================
-
-const prisma = new PrismaClient();
+const prisma = getPrisma();
 
 // ============================================
 // JOB PAYLOAD TYPE

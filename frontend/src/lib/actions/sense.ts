@@ -11,7 +11,7 @@
  * 5. Refine Intent Graph
  */
 
-import { auth } from '@clerk/nextjs/server';
+import { getServerAuthHeaders } from '@/lib/server-auth';
 import { getApiBase } from '@/lib/api-base';
 
 // ============================================
@@ -100,14 +100,13 @@ export async function uploadSenseInputs(
   files: File[]
 ): Promise<{ success: boolean; urls?: string[]; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    console.log('[Sense] Auth token present:', !!token);
+    console.log('[Sense] Auth headers present:', !!authHeaders);
     console.log('[Sense] Backend URL:', getApiBase());
     console.log('[Sense] Files to upload:', files.length);
 
-    if (!token) {
+    if (!authHeaders) {
       console.error('[Sense] No auth token - user not authenticated');
       return { success: false, error: 'Not authenticated. Please sign in.' };
     }
@@ -127,7 +126,7 @@ export async function uploadSenseInputs(
       const response = await fetch(`${getApiBase()}/api/uploads`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': authHeaders!.Authorization,
         },
         body: formData,
       });
@@ -175,13 +174,12 @@ export async function processIntent(
   }
 ): Promise<{ success: boolean; jobId?: string; fromCache?: boolean; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
     console.log('[Sense] Processing intent for project:', projectId);
     console.log('[Sense] Inputs:', JSON.stringify(inputs, null, 2));
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
@@ -189,7 +187,7 @@ export async function processIntent(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
       body: JSON.stringify({
         projectId,
@@ -234,19 +232,18 @@ export async function getIntentGraph(
   projectId: string
 ): Promise<{ success: boolean; data?: IntentGraph; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
     console.log('[Sense] Fetching Intent Graph for project:', projectId);
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/sense/${projectId}`, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
       cache: 'no-store',
     });
@@ -293,13 +290,12 @@ export async function refineIntentGraph(
   }
 ): Promise<{ success: boolean; jobId?: string; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
     console.log('[Sense] Refining Intent Graph for project:', projectId);
     console.log('[Sense] Refinements:', JSON.stringify(refinements, null, 2));
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
@@ -307,7 +303,7 @@ export async function refineIntentGraph(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
       body: JSON.stringify({ refinements }),
     });
@@ -348,19 +344,18 @@ export async function deleteIntentGraph(
   projectId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
     console.log('[Sense] Deleting Intent Graph for project:', projectId);
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/sense/${projectId}`, {
       method: 'DELETE',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
     });
 
@@ -397,17 +392,16 @@ export async function getSenseJobStatus(
   jobId: string
 ): Promise<{ success: boolean; data?: SenseJobResult; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/jobs/${jobId}`, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
       cache: 'no-store',
     });

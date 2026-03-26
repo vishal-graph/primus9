@@ -11,19 +11,47 @@ import { logger } from '../lib/logger';
 
 import IORedis from 'ioredis';
 
-// Create a dedicated Redis connection for BullMQ using the full URL connection string
-// This guarantees that all username, password, and TLS configurations in the URL are respected
-const connection = new IORedis(config.redisUrl, {
-  maxRetriesPerRequest: null,
-  family: 0, // Force IPv4/IPv6 heuristic (required for Upstash and some local IPs)
-  enableReadyCheck: false,
-});
+/**
+ * BullMQ must not share one IORedis between Worker and Queue/QueueEvents:
+ * the worker uses blocking Redis commands; multiplexing causes ECONNRESET and stalls.
+ * @see https://docs.bullmq.io/guide/connections
+ */
+function createBullRedisConnection(role: string): IORedis {
+  const client = new IORedis(config.redisUrl, {
+    maxRetriesPerRequest: null,
+    family: 0,
+    enableReadyCheck: false,
+    connectTimeout: 30_000,
+    retryStrategy(times) {
+      if (times > 100) return null;
+      return Math.min(times * 200, 8_000);
+    },
+    reconnectOnError(err) {
+      const msg = err.message || '';
+      if (msg.includes('READONLY')) return true;
+      if (msg.includes('ECONNRESET')) return true;
+      return false;
+    },
+  });
+  client.on('error', (err) => {
+    logger.warn({ err: err.message, role }, 'BullMQ Redis TCP error (will retry if strategy allows)');
+  });
+  client.on('close', () => {
+    logger.debug({ role }, 'BullMQ Redis connection closed');
+  });
+  return client;
+}
 
-logger.info({
-  host: connection.host,
-  port: connection.port,
-  hasPassword: !!connection.password,
-}, 'Redis connection config for BullMQ');
+const queueConnection = createBullRedisConnection('queue');
+const queueEventsConnection = createBullRedisConnection('queue-events');
+
+logger.info(
+  {
+    hasPassword: /\b:[^:@]+@/.test(config.redisUrl) || config.redisUrl.includes('default:'),
+    tls: config.redisUrl.startsWith('rediss://'),
+  },
+  'Redis connection config for BullMQ (separate clients for queue / events / worker)'
+);
 
 /**
  * AI Job Queue
@@ -33,7 +61,7 @@ logger.info({
  *            INTERIOR, COMPONENT_UPDATE, PDF_EXPORT, SENSE_INFERENCE
  */
 export const aiJobQueue = new Queue('ai-jobs', {
-  connection,
+  connection: queueConnection,
   defaultJobOptions: {
     attempts: 3,
     backoff: {
@@ -54,7 +82,7 @@ export const aiJobQueue = new Queue('ai-jobs', {
 /**
  * Queue Events for monitoring
  */
-export const aiJobEvents = new QueueEvents('ai-jobs', { connection });
+export const aiJobEvents = new QueueEvents('ai-jobs', { connection: queueEventsConnection });
 
 aiJobEvents.on('completed', ({ jobId, returnvalue }) => {
   logger.info({ jobId, hasResult: !!returnvalue }, '[BullMQ] Job completed');
@@ -87,6 +115,8 @@ aiJobEvents.on('progress', ({ jobId, data }) => {
 export function createAIWorker(concurrency: number = 3) {
   logger.info({ concurrency }, 'Creating BullMQ worker');
 
+  const workerConnection = createBullRedisConnection('worker');
+
   const worker = new Worker(
     'ai-jobs',
     async (job: Job) => {
@@ -116,7 +146,7 @@ export function createAIWorker(concurrency: number = 3) {
       }
     },
     {
-      connection,
+      connection: workerConnection,
       concurrency, // Process up to N jobs concurrently
       // ROOM_WALKTHROUGH can take 5–10 min (gen4_turbo + upload + gen4_aleph poll). Keep lock long enough to avoid "could not renew lock".
       lockDuration: 15 * 60 * 1000, // 15 minutes (default 30s was too short)
@@ -150,5 +180,9 @@ export function createAIWorker(concurrency: number = 3) {
 export async function closeQueues() {
   await aiJobQueue.close();
   await aiJobEvents.close();
+  await Promise.all([
+    queueConnection.quit().catch(() => queueConnection.disconnect()),
+    queueEventsConnection.quit().catch(() => queueEventsConnection.disconnect()),
+  ]);
 }
 

@@ -1,8 +1,8 @@
 'use client';
+import { getAccessToken, getAuthUser, type AuthUser } from '@/lib/auth-client';
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@clerk/nextjs';
 import {
   Container,
   Box,
@@ -66,19 +66,18 @@ interface Invoice {
 
 export default function BillingPage() {
   const router = useRouter();
-  const { getToken } = useAuth();
-  const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(true);
   const [planStatus, setPlanStatus] = useState<UserPlanStatus | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
 
   useEffect(() => {
     fetchBillingData();
-  }, [getToken]);
+  }, []);
 
   const fetchBillingData = async () => {
     try {
       setLoading(true);
-      const token = await getToken();
+      const token = getAccessToken();
       const headers: HeadersInit = {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -106,7 +105,7 @@ export default function BillingPage() {
 
   const handleDownloadInvoice = async (invoiceId: string) => {
     try {
-      const token = await getToken();
+      const token = getAccessToken();
       const headers: HeadersInit = {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       };

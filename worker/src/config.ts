@@ -63,17 +63,40 @@ const configSchema = z.object({
   geminiTextApiVersion: z.string().default('v1'),
   geminiImageApiVersion: z.string().default('v1beta'),
 
-  // Worker Settings
-  workerConcurrency: z.coerce.number().default(2),
+  // Worker Settings (default 1 to avoid DB pool exhaustion with Neon/Supabase Session mode)
+  workerConcurrency: z.coerce.number().default(1),
   workerPollInterval: z.coerce.number().default(20),
   workerMaxProcessingTime: z.coerce.number().default(300), // 5 minutes
 });
 
 type Config = z.infer<typeof configSchema>;
 
+/** Same rules as backend — plain redis:// to Upstash is closed by the server. */
+function normalizeRedisUrl(url: string): string {
+  const trimmed = url.trim();
+  if (!trimmed.toLowerCase().startsWith('redis://')) {
+    return trimmed;
+  }
+  try {
+    const rest = trimmed.slice('redis://'.length);
+    const hostPart = rest.includes('@') ? rest.split('@')[1] : rest;
+    const host = (hostPart.split(':')[0] || '').toLowerCase();
+    if (
+      host.endsWith('.upstash.io') ||
+      host.endsWith('.redis.cloud') ||
+      host.includes('redns.redis-cloud.com')
+    ) {
+      return `rediss://${rest}`;
+    }
+  } catch {
+    /* keep */
+  }
+  return trimmed;
+}
+
 function loadConfig(): Config {
   try {
-    return configSchema.parse({
+    const parsed = configSchema.parse({
       serviceName: process.env.SERVICE_NAME,
       nodeEnv: process.env.NODE_ENV,
       databaseUrl: process.env.DATABASE_URL,
@@ -108,6 +131,9 @@ function loadConfig(): Config {
       workerPollInterval: process.env.WORKER_POLL_INTERVAL,
       workerMaxProcessingTime: process.env.WORKER_MAX_PROCESSING_TIME,
     });
+    const redisUrl = normalizeRedisUrl(parsed.redisUrl);
+    process.env.REDIS_URL = redisUrl;
+    return { ...parsed, redisUrl };
   } catch (error) {
     console.error('❌ Worker configuration validation failed:');
     if (error instanceof z.ZodError) {

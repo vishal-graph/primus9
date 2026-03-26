@@ -87,7 +87,7 @@ const STAGES: StageItem[] = [
   },
   {
     stage: 'TWO_D_VIEWS',
-    label: '2D Views',
+    label: '3D Views',
     icon: <ViewInAr />,
     description: 'Room wall views',
   },

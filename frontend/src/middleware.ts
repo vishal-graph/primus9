@@ -1,87 +1,72 @@
-import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
-import { NextResponse } from 'next/server';
-import { clerkClient } from '@clerk/nextjs/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 /**
- * Clerk Middleware Configuration
- * Protects routes and handles authentication
- * Special handling for admin routes (/krsna)
+ * TatvaOps Vision — Next.js Middleware
+ *
+ * Replaces clerkMiddleware. Checks for `tatvaops_token` or `tatvaops_refresh` cookie.
+ * Does NOT verify JWT signature here (edge runtime can't use jsonwebtoken easily).
+ * Actual verification happens on the auth-service side via Bearer token on each API call.
+ * 
+ * Route protection rules:
+ * - /login, /onboarding  → public (no redirect)
+ * - /sign-in, /sign-up   → redirect to /login (Clerk routes killed)
+ * - /krsna/*             → admin only (checked by backend, not here)
+ * - everything else      → redirect to /login if no session cookies (access or refresh)
  */
 
-const isPublicRoute = createRouteMatcher([
-  '/',
-  '/sign-in(.*)',
-  '/sign-up(.*)',
-  '/api/webhooks/(.*)',
-]);
+const PUBLIC_PATHS = [
+  '/login',
+  '/onboarding',
+  '/_next',
+  '/favicon.ico',
+  '/logo.png',
+  '/api/webhook',   // Razorpay / other inbound webhooks (no auth needed)
+];
 
-const isAdminRoute = createRouteMatcher([
-  '/krsna(.*)',
-]);
+// Legacy Clerk routes — redirect to new login
+const LEGACY_AUTH_PATHS = ['/sign-in', '/sign-up'];
 
-/**
- * Check if email is a TatvaOps admin email
- */
-function isTatvaOpsEmail(email: string | null | undefined): boolean {
-  if (!email) return false;
-  return email.toLowerCase().endsWith('@tatvaops.com');
+function isPublic(pathname: string): boolean {
+  return PUBLIC_PATHS.some(
+    (p) => pathname === p || pathname.startsWith(p + '/')
+  );
 }
 
-export default clerkMiddleware(async (auth, request) => {
-  const { userId } = auth();
+export function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
 
-  // Handle admin routes
-  if (isAdminRoute(request)) {
-    // Must be authenticated
-    if (!userId) {
-      const signInUrl = new URL('/sign-in', request.url);
-      signInUrl.searchParams.set('redirect_url', request.url);
-      signInUrl.searchParams.set('error', 'admin_auth_required');
-      return NextResponse.redirect(signInUrl);
-    }
-
-    // Check if user has @tatvaops.com email
-    try {
-      const user = await clerkClient.users.getUser(userId);
-      const primaryEmail = user.emailAddresses.find(
-        (email) => email.id === user.primaryEmailAddressId
-      );
-      const userEmail = primaryEmail?.emailAddress || null;
-
-      if (!isTatvaOpsEmail(userEmail)) {
-        // Redirect to sign-in with error message
-        const signInUrl = new URL('/sign-in', request.url);
-        signInUrl.searchParams.set('error', 'admin_access_denied');
-        return NextResponse.redirect(signInUrl);
-      }
-
-      // User is authorized admin, continue
-      return NextResponse.next();
-    } catch (error) {
-      console.error('Error checking admin access:', error);
-      const signInUrl = new URL('/sign-in', request.url);
-      signInUrl.searchParams.set('error', 'admin_check_failed');
-      return NextResponse.redirect(signInUrl);
-    }
+  // Redirect old Clerk sign-in/sign-up to new login
+  if (LEGACY_AUTH_PATHS.some((p) => pathname.startsWith(p))) {
+    return NextResponse.redirect(new URL('/login', req.url));
   }
 
-  // Handle regular protected routes
-  if (!isPublicRoute(request)) {
-    if (!userId) {
-      const signInUrl = new URL('/sign-in', request.url);
-      signInUrl.searchParams.set('redirect_url', request.url);
-      return NextResponse.redirect(signInUrl);
-    }
+  // Public paths — let through
+  if (isPublic(pathname)) {
+    return NextResponse.next();
+  }
+
+  const token = req.cookies.get('tatvaops_token')?.value;
+  const refresh = req.cookies.get('tatvaops_refresh')?.value;
+
+  // Allow refresh-only (e.g. access cookie expired and was removed by older deployments)
+  if (!token && !refresh) {
+    const loginUrl = new URL('/login', req.url);
+    loginUrl.searchParams.set('redirect', pathname);
+    return NextResponse.redirect(loginUrl);
   }
 
   return NextResponse.next();
-});
+}
 
 export const config = {
   matcher: [
-    // Skip Next.js internals and all static files
-    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
-    // Always run for API routes
-    '/(api|trpc)(.*)',
+    /*
+     * Match all request paths EXCEPT:
+     * - _next/static (static files)
+     * - _next/image (image optimization)
+     * - favicon.ico
+     * - public files in /public/
+     */
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };

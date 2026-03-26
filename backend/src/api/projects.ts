@@ -8,6 +8,8 @@ import { storageService } from '../services/storage';
 import { checkProjectLimit, checkRateLimit } from '../services/plan-guardrails';
 import { generateUniqueSlug, resolveProjectId } from '../lib/slug';
 import * as XLSX from 'xlsx';
+import { reApplyNumericApproximateSizesToStoredRows } from '../lib/component-extraction-room-scale';
+import componentOrdersRouter from './component-orders';
 
 const router = Router();
 
@@ -955,7 +957,7 @@ router.get('/:id/components', async (req, res, next) => {
         },
       },
       include: {
-        room: { select: { id: true, name: true } },
+        room: { select: { id: true, name: true, type: true, geometry: true, metadata: true } },
       },
       orderBy: [
         { roomId: 'asc' },
@@ -973,10 +975,15 @@ router.get('/:id/components', async (req, res, next) => {
 
     const roomTables = Array.from(latestByRoom.values()).map((extraction) => {
       const data = extraction.data as any;
+      const rawRows = Array.isArray(data?.rows) ? data.rows : [];
+      const rows = reApplyNumericApproximateSizesToStoredRows(rawRows, extraction.room);
+      const roomType =
+        (typeof data?.roomType === 'string' && data.roomType) || extraction.room.type || '';
       return {
         roomId: extraction.roomId,
         roomName: extraction.room.name,
-        rows: Array.isArray(data?.rows) ? data.rows : [],
+        roomType,
+        rows,
         s3Key: extraction.s3Key,
         version: extraction.version,
         createdAt: extraction.createdAt,
@@ -986,6 +993,7 @@ router.get('/:id/components', async (req, res, next) => {
     const combinedRows = roomTables.flatMap((roomTable) =>
       (roomTable.rows || []).map((row: any) => ({
         roomName: row.roomName || roomTable.roomName,
+        roomType: roomTable.roomType || '',
         componentCategory: row.componentCategory || '',
         componentName: row.componentName || '',
         description: row.description || '',
@@ -996,6 +1004,13 @@ router.get('/:id/components', async (req, res, next) => {
         wallLocation: row.wallLocation || '',
         suggestedBuyLinks: formatBuyLinks(row.suggestedBuyLinks || []),
         confidence: typeof row.confidence === 'number' ? String(row.confidence) : '',
+        pricingType: row.pricingType != null ? String(row.pricingType) : '',
+        materialCost:
+          row.materialCost != null && row.materialCost !== '' ? String(row.materialCost) : '',
+        labourCost: row.labourCost != null && row.labourCost !== '' ? String(row.labourCost) : '',
+        totalCost: row.totalCost != null && row.totalCost !== '' ? String(row.totalCost) : '',
+        calculation: row.calculation != null ? String(row.calculation) : '',
+        notes: row.notes != null ? String(row.notes) : '',
       }))
     );
 
@@ -1015,6 +1030,7 @@ router.get('/:id/components', async (req, res, next) => {
       for (const roomTable of roomTables) {
         const sheetRows = (roomTable.rows || []).map((row: any) => ({
           roomName: row.roomName || roomTable.roomName,
+          roomType: roomTable.roomType || '',
           componentCategory: row.componentCategory || '',
           componentName: row.componentName || '',
           description: row.description || '',
@@ -1025,6 +1041,13 @@ router.get('/:id/components', async (req, res, next) => {
           wallLocation: row.wallLocation || '',
           suggestedBuyLinks: formatBuyLinks(row.suggestedBuyLinks || []),
           confidence: typeof row.confidence === 'number' ? String(row.confidence) : '',
+          pricingType: row.pricingType != null ? String(row.pricingType) : '',
+          materialCost:
+            row.materialCost != null && row.materialCost !== '' ? String(row.materialCost) : '',
+          labourCost: row.labourCost != null && row.labourCost !== '' ? String(row.labourCost) : '',
+          totalCost: row.totalCost != null && row.totalCost !== '' ? String(row.totalCost) : '',
+          calculation: row.calculation != null ? String(row.calculation) : '',
+          notes: row.notes != null ? String(row.notes) : '',
         }));
         const sheet = XLSX.utils.json_to_sheet(sheetRows);
         const sheetName = roomTable.roomName.substring(0, 31) || 'Room';
@@ -1169,6 +1192,9 @@ router.get('/:id/isometric/latest', async (req, res, next) => {
     next(error);
   }
 });
+
+// Component orders (checkout / request from Components stage)
+router.use('/:id/component-orders', componentOrdersRouter);
 
 // Helper to get next version number
 async function getNextVersion(projectId: string, stage: ProjectStage): Promise<number> {

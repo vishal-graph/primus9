@@ -10,7 +10,7 @@
  * 4. Fetch analysis results
  */
 
-import { auth } from '@clerk/nextjs/server';
+import { getServerAuthHeaders } from '@/lib/server-auth';
 import { getApiBase } from '@/lib/api-base';
 
 // ============================================
@@ -22,6 +22,8 @@ export interface Room {
   name: string;
   type: string;
   area: number | null;
+  /** Unit for area (from metadata.areaUnit) — e.g. 'sqft', 'sqm' */
+  areaUnit: string | null;
   confidence: number;
   status: 'PENDING' | 'CONFIRMED' | 'REJECTED';
   reasoning: string;
@@ -30,8 +32,23 @@ export interface Room {
   };
   symbolsDetected: string[];
   textDetected: string[];
+  /** Adjacent room names from initial detection (metadata.adjacentRooms) */
+  adjacentRooms?: string[];
+  /** AI detection temp id (e.g. room_2) — maps adjacency refs to this room */
+  detectionTempId?: string;
   // Moodboards for the room (used by ElevationStage)
   moodboards?: Array<{ id: string; imageUrl: string; version: number }>;
+  // Spatial enrichment data (from worker enrichment step)
+  enrichment?: {
+    dimensions?: { length_ft: number | null; width_ft: number | null };
+    area_sqft?: number | null;
+    wall_thickness_ft?: number | null;
+    openings?: { doors: number; windows: number };
+    position?: string;
+    adjacent_to?: string[];
+    confidence?: number;
+    source?: string;
+  };
 }
 
 export interface AnalysisResult {
@@ -53,14 +70,13 @@ export async function uploadFloorPlan(
   projectName?: string
 ): Promise<{ success: boolean; imageUrl?: string; projectId?: string; slug?: string; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    console.log('[FloorPlan] Auth token present:', !!token);
+    console.log('[FloorPlan] Auth headers present:', !!authHeaders);
     console.log('[FloorPlan] Backend URL:', getApiBase());
     console.log('[FloorPlan] Project ID:', projectId);
 
-    if (!token) {
+    if (!authHeaders) {
       console.error('[FloorPlan] No auth token - user not authenticated');
       return { success: false, error: 'Not authenticated. Please sign in.' };
     }
@@ -83,7 +99,7 @@ export async function uploadFloorPlan(
       // Check if user is internal and needs to select a plan
       const userResponse = await fetch(`${getApiBase()}/api/user/me`, {
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': authHeaders!.Authorization,
         },
       });
       
@@ -110,7 +126,7 @@ export async function uploadFloorPlan(
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
+          'Authorization': authHeaders!.Authorization,
         },
         body: JSON.stringify(projectPayload),
       });
@@ -132,7 +148,7 @@ export async function uploadFloorPlan(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
       body: JSON.stringify({
         filename: file.name,
@@ -173,7 +189,7 @@ export async function uploadFloorPlan(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
       body: JSON.stringify({
         key,
@@ -209,10 +225,9 @@ export async function triggerFloorPlanAnalysis(
   imageUrl: string
 ): Promise<{ success: boolean; jobId?: string; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
@@ -220,7 +235,7 @@ export async function triggerFloorPlanAnalysis(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
       body: JSON.stringify({
         type: 'FLOORPLAN_ANALYSIS',
@@ -256,16 +271,15 @@ export async function triggerFloorPlanAnalysis(
 
 export async function getJobStatus(jobId: string): Promise<AnalysisResult & { networkError?: boolean; stage?: string; message?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { jobId, status: 'FAILED', error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/jobs/${jobId}`, {
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
     });
 
@@ -313,6 +327,33 @@ export interface ProjectData {
   rooms: Room[];
   floorPlanUrl?: string;
   currentStage?: string;
+  spatialEnrichment?: {
+    property?: {
+      shape?: string;
+      dimensions?: { length_ft?: number | null; width_ft?: number | null };
+      total_area_sqft?: number | null;
+      confidence?: number;
+      source?: string;
+    };
+    spatial_relationships?: {
+      entry_flow?: string[];
+      zoning?: {
+        public?: string[];
+        private?: string[];
+        utility?: string[];
+      };
+    };
+    circulation?: {
+      passages?: Array<{ width_ft?: string; connects?: string[] }>;
+    };
+    validation?: {
+      issues?: string[];
+      missing_data?: string[];
+    };
+    status?: string;
+    /** Full enrichment room list: id (e.g. room_2) + name — used to resolve adjacent labels in UI */
+    rooms?: Array<{ id?: string; name?: string; adjacent_to?: string[] }>;
+  };
 }
 
 export async function getProjectData(projectId: string): Promise<{
@@ -321,17 +362,16 @@ export async function getProjectData(projectId: string): Promise<{
   error?: string;
 }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     // Fetch project with rooms
     const projectResponse = await fetch(`${getApiBase()}/api/projects/${projectId}`, {
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
     });
 
@@ -347,7 +387,7 @@ export async function getProjectData(projectId: string): Promise<{
       `${getApiBase()}/api/uploads/assets/${projectId}?assetType=FLOORPLAN_ANALYZED&latestOnly=true`,
       {
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': authHeaders!.Authorization,
         },
       }
     );
@@ -367,7 +407,7 @@ export async function getProjectData(projectId: string): Promise<{
         `${getApiBase()}/api/uploads/assets/${projectId}?assetType=FLOORPLAN_ORIGINAL&latestOnly=true`,
         {
           headers: {
-            'Authorization': `Bearer ${token}`,
+            'Authorization': authHeaders!.Authorization,
           },
         }
       );
@@ -388,15 +428,25 @@ export async function getProjectData(projectId: string): Promise<{
       name: r.name as string,
       type: r.type as string,
       area: metadata(r).areaEstimate as number | null,
+      areaUnit: (metadata(r).areaUnit as string) || 'sqft',
       confidence: r.confidence as number || 0.5,
       status: r.status as Room['status'],
       reasoning: (r.reasoning as string) || (metadata(r).reasoning as string) || '',
       geometry: r.geometry as Room['geometry'],
       symbolsDetected: metadata(r).symbolsDetected as string[] || [],
       textDetected: metadata(r).textDetected as string[] || [],
+      adjacentRooms: metadata(r).adjacentRooms as string[] | undefined,
+      detectionTempId: metadata(r).detectionTempId as string | undefined,
       // Include moodboards for elevation stage
       moodboards: r.moodboards as Array<{ id: string; imageUrl: string; version: number }> || [],
+      // Include enrichment data (from worker spatial enrichment step)
+      enrichment: metadata(r).enrichment as Room['enrichment'] || undefined,
     }));
+
+    // Extract spatial enrichment from project metadata
+    const projectMeta = (project.metadata || {}) as Record<string, unknown>;
+    const floorPlanAnalysisMeta = (projectMeta.floorPlanAnalysis || {}) as Record<string, unknown>;
+    const spatialEnrichment = floorPlanAnalysisMeta.spatialEnrichment as ProjectData['spatialEnrichment'] || undefined;
 
     return { 
       success: true, 
@@ -404,6 +454,7 @@ export async function getProjectData(projectId: string): Promise<{
         rooms, 
         floorPlanUrl,
         currentStage: project.currentStage,
+        spatialEnrichment,
       } 
     };
   } catch (error) {
@@ -435,10 +486,9 @@ export async function updateRoom(
   updates: Partial<Pick<Room, 'name' | 'type' | 'status'>>
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
@@ -446,7 +496,7 @@ export async function updateRoom(
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
       body: JSON.stringify(updates),
     });
@@ -471,17 +521,16 @@ export async function deleteRoom(
   roomId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/projects/${projectId}/rooms/${roomId}`, {
       method: 'DELETE',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
     });
 

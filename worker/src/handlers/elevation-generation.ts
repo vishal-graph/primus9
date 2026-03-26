@@ -26,7 +26,6 @@
  */
 
 import { Message } from '@aws-sdk/client-sqs';
-import { PrismaClient } from '@prisma/client';
 import {
   generateRoomElevations,
   extractWallGeometry,
@@ -38,12 +37,9 @@ import {
 } from '../design-engine';
 import { logger } from '../lib/logger';
 import { validateJobGuardrails } from '../services/plan-guardrails';
+import { getPrisma } from '../lib/prisma';
 
-// ===========================================
-// Database Client
-// ===========================================
-
-const prisma = new PrismaClient();
+const prisma = getPrisma();
 
 // ===========================================
 // Job Payload Type

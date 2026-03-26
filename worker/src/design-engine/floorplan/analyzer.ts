@@ -35,7 +35,7 @@ import {
 } from './preprocessing';
 import { convertPdfToImages, PdfPageImage } from './pdfToImages';
 import { uploadToS3 } from '../../lib/s3';
-import { PrismaClient } from '@prisma/client';
+import { getPrisma } from '../../lib/prisma';
 import {
   SYSTEM_INSTRUCTION,
   PROMPT_SPATIAL_SEGMENTATION,
@@ -75,62 +75,56 @@ async function uploadConvertedPdfImage(
   width: number,
   height: number
 ): Promise<void> {
-  const prisma = new PrismaClient();
-  
-  try {
-    const bucket = process.env.S3_BUCKET_FLOORPLANS || 'tatvaops-vision-floorplans';
-    const key = `${userId}/${projectId}/converted-floorplan.png`;
-    
-    // Upload to S3
-    await uploadToS3({
-      bucket,
-      key,
-      body: imageBuffer,
-      contentType: 'image/png',
-      metadata: {
-        projectId,
-        userId,
-        source: 'pdf-conversion',
-        width: width.toString(),
-        height: height.toString(),
-      },
-    });
-    
-    logger.info('Converted PDF image uploaded to S3', {
+  const prisma = getPrisma();
+
+  const bucket = process.env.S3_BUCKET_FLOORPLANS || 'tatvaops-vision-floorplans';
+  const key = `${userId}/${projectId}/converted-floorplan.png`;
+
+  await uploadToS3({
+    bucket,
+    key,
+    body: imageBuffer,
+    contentType: 'image/png',
+    metadata: {
       projectId,
-      bucket,
-      key,
-      size: imageBuffer.length,
-    });
-    
-    // Create AssetVersion entry
-    await prisma.assetVersion.create({
-      data: {
-        projectId,
-        assetType: 'FLOORPLAN_ANALYZED',
-        version: 1,
-        s3Bucket: bucket,
-        s3Key: key,
-        contentType: 'image/png',
-        fileSize: imageBuffer.length,
-        metadata: {
-          source: 'pdf-conversion',
-          width,
-          height,
-          originalFormat: 'pdf',
-        },
-        isLatest: true,
-        createdBy: userId,
-      },
-    });
-    
-    logger.info('AssetVersion created for converted PDF', {
+      userId,
+      source: 'pdf-conversion',
+      width: width.toString(),
+      height: height.toString(),
+    },
+  });
+
+  logger.info('Converted PDF image uploaded to S3', {
+    projectId,
+    bucket,
+    key,
+    size: imageBuffer.length,
+  });
+
+  await prisma.assetVersion.create({
+    data: {
       projectId,
       assetType: 'FLOORPLAN_ANALYZED',
-    });
-  } finally {
-    await prisma.$disconnect();
-  }
+      version: 1,
+      s3Bucket: bucket,
+      s3Key: key,
+      contentType: 'image/png',
+      fileSize: imageBuffer.length,
+      metadata: {
+        source: 'pdf-conversion',
+        width,
+        height,
+        originalFormat: 'pdf',
+      },
+      isLatest: true,
+      createdBy: userId,
+    },
+  });
+
+  logger.info('AssetVersion created for converted PDF', {
+    projectId,
+    assetType: 'FLOORPLAN_ANALYZED',
+  });
 }
 
 // ============================================
@@ -600,7 +594,7 @@ async function analyzePageImage(
   const roomsWithPageContext = analysisResult.rooms.map(room => ({
     ...room,
     tempId: `p${pageImage.page}_${room.tempId}`,
-    reasoning: `[Page ${pageImage.page}] ${room.reasoning || ''}`,
+    reasoning: room.reasoning || '',
   }));
   
   return {

@@ -1,0 +1,15 @@
+--- BUDGET: budget (Normalized: Economy) ---
+Contains NO BATHTUBS: true
+Contains BATHTUB PERMITTED: false
+Tropical Climate Rule: 2. TROPICAL CLIMATE: Ensure spaces look adapted for Indian climates (e.g., cross-ventilation, ceiling fans, or sheer curtains). **If windows are shown**, they must include practical elements like security grills. Avoid fireplaces, heavy velvet drapes, or thick woolen rugs.
+
+--- BUDGET: moderate (Normalized: Standard) ---
+Contains NO BATHTUBS: true
+Contains BATHTUB PERMITTED: false
+Tropical Climate Rule: 2. TROPICAL CLIMATE: Ensure spaces look adapted for Indian climates (e.g., cross-ventilation, ceiling fans, or sheer curtains). **If windows are shown**, they must include practical elements like security grills. Avoid fireplaces, heavy velvet drapes, or thick woolen rugs.
+
+--- BUDGET: premium (Normalized: Premium) ---
+Contains NO BATHTUBS: false
+Contains BATHTUB PERMITTED: true
+Tropical Climate Rule: 2. TROPICAL CLIMATE: Ensure spaces look adapted for Indian climates (e.g., cross-ventilation, ceiling fans, or sheer curtains). **If windows are shown**, they must include practical elements like security grills. Avoid fireplaces, heavy velvet drapes, or thick woolen rugs.
+

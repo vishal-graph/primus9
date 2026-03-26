@@ -6,20 +6,29 @@
  */
 
 import { Message } from '@aws-sdk/client-sqs';
-import { PrismaClient } from '@prisma/client';
 import { logger } from '../lib/logger';
+import { getPrisma } from '../lib/prisma';
 import { config } from '../config';
 import { validateJobGuardrails } from '../services/plan-guardrails';
 import { downloadFromS3, uploadToS3 } from '../lib/s3';
 import { getGeminiClient } from '../design-engine/common/gemini-client';
 import { buildComponentExtractionPrompt } from '../design-engine/component-extraction/promptBuilder';
 import {
+  buildRoomScaleContextBlock,
+  ensureNumericApproximateSize,
+  extractCirculationHintFromProjectMetadata,
+  extractRoomMetricsFromRoom,
+  stripBareSizeLetterLabel,
+  type RoomExtractionMetrics,
+} from '../design-engine/component-extraction/roomScaleForExtraction';
+import {
   ComponentExtractionResult,
   ComponentExtractionRow,
+  PricingType,
 } from '../design-engine/component-extraction/types';
 import { GeminiPart } from '../design-engine/types';
 
-const prisma = new PrismaClient();
+const prisma = getPrisma();
 
 interface ComponentExtractionJobPayload {
   jobId: string;
@@ -65,23 +74,153 @@ function extractJsonBlock(text: string): string {
   return text.slice(start, end + 1);
 }
 
+const APPROX_DISCLAIMER =
+  'Approximate—estimated from visuals; not measured on site; verify before procurement.';
+
+function ensureApproximateDisclaimer(
+  row: ComponentExtractionRow
+): ComponentExtractionRow {
+  const cat = row.componentCategory;
+  if (cat !== 'Furniture' && cat !== 'Fixed Components') {
+    return row;
+  }
+  const text = (row.approximateSize || '').trim();
+  // Let ensureNumericApproximateSize fill dimensions first—never inject bare S/M/L here.
+  if (!text) {
+    return row;
+  }
+  const hasApproxHint =
+    /\bapprox\.?|approximate|estimated|not measured|verify before|~/.test(text.toLowerCase());
+  if (hasApproxHint) {
+    return row;
+  }
+  return { ...row, approximateSize: `${text} | ${APPROX_DISCLAIMER}` };
+}
+
+const VALID_COMPONENT_CATEGORIES = new Set([
+  'Furniture',
+  'Fixed Components',
+  'Materials & Finishes',
+  'Lighting',
+  'Decor & Accessories',
+]);
+
+/** Gemini often returns "Fixed" or "Materials" — map so fallbacks and buy links work. */
+function normalizeComponentCategory(raw: unknown): ComponentExtractionRow['componentCategory'] {
+  const s = String(raw ?? '').trim();
+  if (VALID_COMPONENT_CATEGORIES.has(s)) {
+    return s as ComponentExtractionRow['componentCategory'];
+  }
+  const lower = s.toLowerCase().replace(/\s+/g, ' ');
+  if (lower === 'fixed' || lower === 'fixed component' || lower.startsWith('fixed')) {
+    return 'Fixed Components';
+  }
+  if (
+    lower === 'materials' ||
+    lower === 'finishes' ||
+    lower === 'material' ||
+    lower === 'finish' ||
+    lower === 'materials and finishes' ||
+    (lower.includes('material') && lower.includes('finish'))
+  ) {
+    return 'Materials & Finishes';
+  }
+  if (lower === 'furniture') return 'Furniture';
+  if (lower === 'lighting' || lower === 'light' || lower === 'lights') return 'Lighting';
+  if (lower === 'decor' || lower === 'accessories' || lower === 'decor & accessories') {
+    return 'Decor & Accessories';
+  }
+  return 'Materials & Finishes';
+}
+
+const VALID_PRICING_TYPES = new Set<PricingType>(['area', 'unit', 'custom']);
+
+function coerceRupee(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.round(value);
+  }
+  if (typeof value === 'string') {
+    const cleaned = value.replace(/[₹Rs.,\s]/gi, '');
+    const n = parseFloat(cleaned);
+    return Number.isFinite(n) ? Math.round(n) : 0;
+  }
+  return 0;
+}
+
+/**
+ * Ensures BOQ fields exist (older extractions / partial model output) and total = material + labour.
+ */
+function normalizePricingFields(row: ComponentExtractionRow): ComponentExtractionRow {
+  const raw = row as unknown as Record<string, unknown>;
+  let pricingType = String(raw.pricingType ?? '')
+    .toLowerCase()
+    .trim();
+  if (!VALID_PRICING_TYPES.has(pricingType as PricingType)) {
+    pricingType = 'unit';
+  }
+  const materialCost = coerceRupee(raw.materialCost);
+  const labourCost = coerceRupee(raw.labourCost);
+  let totalCost = coerceRupee(raw.totalCost);
+  const sum = materialCost + labourCost;
+  let notes = String(raw.notes ?? row.notes ?? '').trim();
+  if (Math.abs(totalCost - sum) > 1) {
+    totalCost = sum;
+    const fix = 'Adjusted totalCost to materialCost + labourCost.';
+    notes = notes ? `${notes} ${fix}` : fix;
+  }
+  const calculation = String(raw.calculation ?? row.calculation ?? '').trim();
+  return {
+    ...row,
+    pricingType: pricingType as PricingType,
+    materialCost,
+    labourCost,
+    totalCost,
+    calculation,
+    notes,
+  };
+}
+
+/** Gemini sometimes returns snake_case or alternate keys. */
+function pickApproximateSizeFromRow(row: Record<string, unknown>): string {
+  const v =
+    row.approximateSize ??
+    row.approximate_size ??
+    row.size ??
+    row.approximateDimensions ??
+    row.dimension ??
+    '';
+  if (v == null) return '';
+  return String(v);
+}
+
 function normalizeRows(
   result: ComponentExtractionResult,
-  roomName: string
+  roomName: string,
+  roomMetrics: RoomExtractionMetrics | null
 ): ComponentExtractionRow[] {
   if (!result?.rows || !Array.isArray(result.rows)) {
     return [];
   }
 
   return result.rows
-    .map((row) => ({
-      ...row,
-      roomName: row.roomName || roomName,
-      suggestedBuyLinks:
-        Array.isArray(row.suggestedBuyLinks) && row.suggestedBuyLinks.length > 0
-          ? row.suggestedBuyLinks
-          : BUY_LINK_FALLBACKS[row.componentCategory] || [],
-    }))
+    .map((row) => {
+      const componentCategory = normalizeComponentCategory(row.componentCategory);
+      return {
+        ...row,
+        roomName: row.roomName || roomName,
+        componentCategory,
+        approximateSize: stripBareSizeLetterLabel(
+          pickApproximateSizeFromRow(row as unknown as Record<string, unknown>).trim()
+        ),
+        suggestedBuyLinks:
+          Array.isArray(row.suggestedBuyLinks) && row.suggestedBuyLinks.length > 0
+            ? row.suggestedBuyLinks
+            : BUY_LINK_FALLBACKS[componentCategory] || [],
+      };
+    })
+    .map(ensureApproximateDisclaimer)
+    .map((row) => ensureNumericApproximateSize(row, roomMetrics))
+    .map(normalizePricingFields)
     .filter((row) => typeof row.confidence === 'number' && row.confidence >= 50);
 }
 
@@ -181,7 +320,7 @@ export async function handleComponentExtraction(
 
     const room = await prisma.room.findFirst({
       where: { id: roomId, projectId },
-      select: { id: true, name: true },
+      select: { id: true, name: true, type: true, geometry: true, metadata: true },
     });
 
     if (!room) {
@@ -251,7 +390,16 @@ export async function handleComponentExtraction(
       }
     }
 
-    parts.push({ text: buildComponentExtractionPrompt(room.name) });
+    const projectRow = await prisma.project.findFirst({
+      where: { id: projectId },
+      select: { metadata: true },
+    });
+    const circulationHint = extractCirculationHintFromProjectMetadata(projectRow?.metadata);
+    const roomMetrics = extractRoomMetricsFromRoom(room, room.type);
+    const roomScaleBlock = buildRoomScaleContextBlock(room.name, roomMetrics, circulationHint);
+    parts.push({
+      text: buildComponentExtractionPrompt(room.name, roomScaleBlock, room.type || ''),
+    });
 
     const gemini = getGeminiClient();
     let responseText = '';
@@ -284,7 +432,7 @@ export async function handleComponentExtraction(
       });
       throw parseError;
     }
-    const rows = normalizeRows(parsed, room.name);
+    const rows = normalizeRows(parsed, room.name, roomMetrics);
 
     if (rows.length === 0) {
       logger.warn('No valid component rows extracted', { roomId, projectId });
@@ -302,7 +450,11 @@ export async function handleComponentExtraction(
     await uploadToS3({
       bucket: config.s3BucketRenders,
       key: s3Key,
-      body: JSON.stringify({ roomName: room.name, rows }),
+      body: JSON.stringify({
+        roomName: room.name,
+        roomType: room.type || undefined,
+        rows,
+      }),
       contentType: 'application/json',
       metadata: {
         projectId,
@@ -316,7 +468,7 @@ export async function handleComponentExtraction(
       data: {
         roomId,
         version: nextVersion,
-        data: { roomName: room.name, rows } as any,
+        data: { roomName: room.name, roomType: room.type || undefined, rows } as any,
         s3Key,
         jobId,
       },

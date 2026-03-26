@@ -12,8 +12,6 @@ import { logger } from './logger';
 
 class RedisClient {
     private client: Redis | null = null;
-    private isConnected: boolean = false;
-    private maxConnectionAttempts: number = 3;
 
     constructor() {
         this.connect();
@@ -21,42 +19,50 @@ class RedisClient {
 
     private connect(): void {
         try {
-            // Use config.redisUrl if available, otherwise default to local
-            const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+            const redisUrl = config.redisUrl;
 
             this.client = new Redis(redisUrl, {
-                maxRetriesPerRequest: 3,
+                maxRetriesPerRequest: 20,
+                enableReadyCheck: false,
+                family: 0,
+                connectTimeout: 30_000,
+                lazyConnect: true,
                 retryStrategy: (times) => {
-                    if (times > this.maxConnectionAttempts) {
-                        logger.warn('Redis max connection attempts reached, operating in degraded mode');
+                    if (times > 80) {
+                        logger.warn('Redis reconnect attempts exhausted, operating in degraded mode');
                         return null;
                     }
-                    return Math.min(times * 100, 3000);
+                    return Math.min(times * 200, 5_000);
                 },
-                lazyConnect: true,
+                reconnectOnError(err) {
+                    const m = err.message || '';
+                    if (m.includes('READONLY') || m.includes('ECONNRESET')) return true;
+                    return false;
+                },
             });
 
-            this.client.on('connect', () => {
-                this.isConnected = true;
-                logger.info('Redis connected');
+            this.client.on('ready', () => {
+                logger.info('Redis ready');
             });
 
             this.client.on('error', (err) => {
-                this.isConnected = false;
-                logger.error({ err }, 'Redis connection error');
+                logger.warn({ err: err.message }, 'Redis connection error');
+            });
+
+            this.client.on('close', () => {
+                logger.debug('Redis connection closed');
             });
 
             this.client.connect().catch((err) => {
-                logger.warn({ err }, 'Redis initial connection failed');
+                logger.warn({ err: err instanceof Error ? err.message : err }, 'Redis initial connect failed');
             });
-
         } catch (err) {
             logger.error({ err }, 'Failed to initialize Redis client');
         }
     }
 
     isAvailable(): boolean {
-        return this.isConnected && this.client !== null;
+        return this.client !== null && this.client.status === 'ready';
     }
 
     /**

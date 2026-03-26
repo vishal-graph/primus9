@@ -1,13 +1,13 @@
-import { auth } from '@clerk/nextjs/server';
+import { getServerAuthHeaders } from '@/lib/server-auth';
 import type { ApiResponse } from '@/types';
 import { getApiBase } from '@/lib/api-base';
 
 /**
  * API Client
  * Abstracted HTTP client for backend communication
- * 
+ *
  * Features:
- * - Automatic auth header injection (via Clerk)
+ * - Automatic auth header injection (via cookie JWT)
  * - Request/response typing
  * - Error handling
  * - Retry logic with exponential backoff
@@ -42,14 +42,9 @@ export async function serverFetch<T>(
     });
   }
 
-  // Get Clerk auth token
-  let token: string | null = null;
-  try {
-    const { getToken } = await auth();
-    token = await getToken();
-  } catch {
-    // Auth not available (e.g., during build)
-  }
+  // Get auth token from cookie
+  const authHeaders = await getServerAuthHeaders();
+  const token = authHeaders?.Authorization?.replace('Bearer ', '') ?? null;
 
   const headers: HeadersInit = {
     'Content-Type': 'application/json',

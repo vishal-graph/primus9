@@ -11,14 +11,14 @@
  */
 
 import { Message } from '@aws-sdk/client-sqs';
-import { PrismaClient } from '@prisma/client';
 import { logger } from '../lib/logger';
+import { getPrisma } from '../lib/prisma';
 import { config } from '../config';
 import { validateJobGuardrails } from '../services/plan-guardrails';
 import { uploadToS3, generateSignedUrl } from '../lib/s3';
 import { generateWalkthrough } from '../design-engine/walkthrough';
 
-const prisma = new PrismaClient();
+const prisma = getPrisma();
 
 interface WalkthroughJobPayload {
   jobId: string;
@@ -236,7 +236,7 @@ export async function handleRoomWalkthroughGeneration(
         roomId,
         resolution: result.resolution,
         duration: String(result.durationSeconds),
-        modelVersion: 'runway-gen4-turbo',
+        modelVersion: 'runway-gen4.5',
       },
     });
 

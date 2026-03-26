@@ -1,8 +1,8 @@
 'use client';
+import { getAccessToken, getAuthUser, type AuthUser } from '@/lib/auth-client';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@clerk/nextjs';
 import {
   Box,
   Container,
@@ -76,15 +76,14 @@ const ACCENT_COLORS = ['#3b82f6', '#ec4899', '#a855f7', '#10b981'];
 export default function PricingPage() {
   const router = useRouter();
   const dispatch = useAppDispatch();
-  const { getToken } = useAuth();
-  const [plans, setPlans] = useState<Plan[]>([]);
+    const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchPlans = async () => {
       setLoading(true);
       try {
-        const token = await getToken();
+        const token = getAccessToken();
         const response = await fetch('/api/plans', {
           headers: {
             'Content-Type': 'application/json',
@@ -99,10 +98,10 @@ export default function PricingPage() {
       setLoading(false);
     };
     fetchPlans();
-  }, [getToken]);
+  }, []);
 
   const handlePurchase = async (plan: Plan) => {
-    const token = await getToken();
+    const token = getAccessToken();
     if (!token) {
       dispatch(showSnackbar({ message: 'Please sign in to continue', severity: 'warning' }));
       return;
@@ -411,7 +410,7 @@ export default function PricingPage() {
                   Features
                 </Typography>
                 {Object.entries(plan.features)
-                  .filter(([, v]) => v)
+                  .filter(([ v]) => v)
                   .map(([key]) => (
                     <Box key={key} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mb: 0.5 }}>
                       <Box sx={{ color: '#71717a', fontSize: '1.125rem', lineHeight: 1.4 }}>✓</Box>

@@ -1,13 +1,12 @@
 /**
  * TatvaOps Vision - Providers
- * 
+ *
  * Composition of all application providers:
+ * - Clerk (auth: useUser, useClerk, useAuth)
  * - Redux Store Provider
  * - MUI Theme Provider
  * - React Query Provider
  * - Snackbar Provider
- * 
- * Note: ClerkProvider is in root layout
  */
 
 'use client';

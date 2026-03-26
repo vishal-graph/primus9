@@ -46,8 +46,9 @@ model User {
   subscriptions Subscription[]
   transactions  Transaction[]
   wallet        UserWallet?
-  payments      Payment[]
-  feedback      Feedback[]
+  payments         Payment[]
+  feedback         Feedback[]
+  componentOrders  ComponentOrder[]
 
   @@index([clerkId])
   @@index([email])
@@ -104,6 +105,7 @@ model Project {
   feedback            Feedback[]
   intentGraph         IntentGraph?
   spatialPlan         SpatialPlan? // NEW: 3D Walkthrough spatial plan
+  componentOrders     ComponentOrder[]
 
   @@index([userId])
   @@index([userId, deletedAt])
@@ -169,8 +171,9 @@ model Room {
   twoDViews     Room2DView[]
   componentExtractions RoomComponentExtraction[]
   walkthroughVideos    RoomWalkthroughVideo[]
-  interiorViews RoomInteriorView[]
-  components    RoomComponent[]
+  interiorViews        RoomInteriorView[]
+  components          RoomComponent[]
+  componentOrders      ComponentOrder[]
 
   @@index([projectId])
   @@index([projectId, status])
@@ -505,6 +508,32 @@ enum ComponentSize {
   M
   L
   XL
+}
+
+// ============================================
+// COMPONENT ORDERS (Request quote / order from Components stage)
+// ============================================
+
+model ComponentOrder {
+  id            String    @id @default(uuid())
+  projectId     String
+  roomId        String
+  userId        String
+  status        String    @default("PENDING") // PENDING, CONFIRMED, etc.
+  items         Json      // Array of { componentName, description, material, finishColor, approximateSize, placement, materialCost, labourCost, totalCost, notes }
+  totalMaterial Decimal?  @db.Decimal(12, 2)
+  totalLabour   Decimal?  @db.Decimal(12, 2)
+  grandTotal    Decimal?  @db.Decimal(12, 2)
+  metadata      Json?     // Optional: delivery address, contact notes
+  createdAt     DateTime  @default(now())
+
+  project Project @relation(fields: [projectId], references: [id])
+  room    Room    @relation(fields: [roomId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@index([projectId])
+  @@index([userId])
+  @@index([createdAt])
 }
 
 // ============================================

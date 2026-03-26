@@ -17,13 +17,11 @@ import {
 } from '@mui/material';
 import { Edit, Save, Cancel } from '@mui/icons-material';
 import { getUserProfile, updateUserProfile, UserProfile } from '@/lib/actions/user';
-import { useUser } from '@clerk/nextjs';
 import LocationPicker from '@/components/LocationPicker';
 
 export default function ProfilePage() {
   const router = useRouter();
-  const { user: clerkUser } = useUser();
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+    const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -133,7 +131,7 @@ export default function ProfilePage() {
         {/* Profile Header */}
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 4 }}>
           <Avatar
-            src={clerkUser?.imageUrl || profile?.avatarUrl}
+            src={profile?.avatarUrl}
             alt={profile?.name || 'User'}
             sx={{ width: 80, height: 80, mr: 3 }}
           />

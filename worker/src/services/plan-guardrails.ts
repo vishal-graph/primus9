@@ -6,17 +6,14 @@
  */
 
 import { PrismaClient, AIJobType, ProjectStage } from '@prisma/client';
+import { prismaClient as prismaSingleton } from '../lib/prisma';
 import { logger } from '../lib/logger';
 import { getPlanDefinition, PlanCode, PlanFeatureKey } from '../lib/plan-config';
 
 // Prisma Client Instance
-let prisma: PrismaClient | null = null;
 
 function getPrisma(): PrismaClient {
-  if (!prisma) {
-    prisma = new PrismaClient();
-  }
-  return prisma;
+  return prismaSingleton;
 }
 
 // ============================================
@@ -262,7 +259,12 @@ export async function validateJobGuardrails(
 
     return { allowed: true };
   } catch (error) {
-    logger.error('[Worker] Error validating job guardrails:', error);
+    logger.error({
+      userId,
+      projectId,
+      jobType,
+      error: error instanceof Error ? error.message : String(error),
+    }, '[Worker] Error validating job guardrails:');
     return {
       allowed: false,
       error: `VALIDATION_ERROR: ${error instanceof Error ? error.message : 'Unknown error'}`,

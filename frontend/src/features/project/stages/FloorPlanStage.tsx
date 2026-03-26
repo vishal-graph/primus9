@@ -61,6 +61,7 @@ import {
   deleteRoom,
   type Room,
   type AnalysisResult,
+  type ProjectData,
 } from '@/lib/actions/floor-plan';
 import { getActiveJobs } from '@/lib/actions/ai-job';
 
@@ -93,6 +94,162 @@ const ROOM_TYPES = [
   { value: 'UNCLASSIFIED', label: 'Unclassified' },
 ];
 
+function bestRoomDisplayLabel(r: Room): string {
+  const texts = (r.textDetected || []).filter((t): t is string => typeof t === 'string');
+  const fromText = texts.find(
+    (t) =>
+      /^[A-Za-z]/.test(t) &&
+      t.length < 48 &&
+      !/^\d+[''-]/.test(t) &&
+      !/\d+\s*[xX×]\s*\d+/.test(t)
+  );
+  if (fromText) return fromText.trim();
+  if (r.name?.trim()) return r.name.trim();
+  const opt = ROOM_TYPES.find((x) => x.value === r.type);
+  return opt?.label || r.type.replace(/_/g, ' ');
+}
+
+/** Remove PDF multi-page prefix from reasoning (e.g. "[Page 1] …") */
+function displayReasoning(reasoning: string | undefined | null): string {
+  if (!reasoning) return '';
+  return reasoning.replace(/^\[Page\s*\d+\]\s*/i, '').trim();
+}
+
+type EnrichmentRoomRef = { id?: string; name?: string };
+
+function extractEnrichmentRoomList(
+  spatialEnrichment: ProjectData['spatialEnrichment']
+): EnrichmentRoomRef[] | null {
+  const r = spatialEnrichment?.rooms;
+  return Array.isArray(r) && r.length > 0 ? (r as EnrichmentRoomRef[]) : null;
+}
+
+/** Map from spatial enrichment snapshot: room_2 → "Kitchen", etc. */
+function buildEnrichmentIdToLabelMap(list: EnrichmentRoomRef[] | null | undefined): Map<string, string> {
+  const m = new Map<string, string>();
+  if (!list?.length) return m;
+  for (const er of list) {
+    const id = er.id?.trim();
+    const name = er.name?.trim();
+    if (!id) continue;
+    const label = name || id;
+    m.set(id, label);
+    m.set(id.toLowerCase(), label);
+  }
+  return m;
+}
+
+function resolveOneAdjacentRef(
+  s: string,
+  enrichmentById: Map<string, string>,
+  enrichmentList: EnrichmentRoomRef[] | null | undefined,
+  tempIdToLabel: Map<string, string>,
+  idToLabel: Map<string, string>,
+  allRooms: Room[]
+): string {
+  const norm = s.trim();
+  if (!norm) return '';
+
+  let label =
+    enrichmentById.get(norm) ??
+    enrichmentById.get(norm.toLowerCase()) ??
+    tempIdToLabel.get(norm) ??
+    tempIdToLabel.get(norm.toLowerCase()) ??
+    idToLabel.get(norm);
+
+  // room_12 → enrichment list position (often matches analysis order)
+  const roomIdxMatch = /^room_(\d+)$/i.exec(norm);
+  if (!label && roomIdxMatch && enrichmentList?.length) {
+    const n = parseInt(roomIdxMatch[1], 10);
+    if (n >= 1 && n <= enrichmentList.length) {
+      const er = enrichmentList[n - 1];
+      label = er?.name?.trim() || er?.id || '';
+    }
+  }
+
+  // circulation_1 → passage / lobby / corridor rooms by stable order
+  const circMatch = /^circulation_(\d+)$/i.exec(norm);
+  if (!label && circMatch) {
+    const n = parseInt(circMatch[1], 10);
+    const circTypes = new Set(['PASSAGE', 'LOBBY', 'CORRIDOR', 'STAIRCASE']);
+    const circRooms = [...allRooms]
+      .filter((r) => circTypes.has(r.type))
+      .sort((a, b) => a.id.localeCompare(b.id));
+    if (n >= 1 && n <= circRooms.length) {
+      label = bestRoomDisplayLabel(circRooms[n - 1]);
+    }
+  }
+
+  // Last resort: room_N → Nth room in top-to-bottom, left-to-right order (matches many floor-plan reads)
+  if (!label || /^room_\d+$/i.test(label)) {
+    const roomIdxMatch2 = /^room_(\d+)$/i.exec(norm);
+    if (roomIdxMatch2 && allRooms.length > 0) {
+      const n = parseInt(roomIdxMatch2[1], 10);
+      const ordered = [...allRooms].sort((a, b) => {
+        const ay = a.geometry?.boundingBox?.y ?? 0;
+        const by = b.geometry?.boundingBox?.y ?? 0;
+        if (Math.abs(ay - by) > 15) return ay - by;
+        const ax = a.geometry?.boundingBox?.x ?? 0;
+        const bx = b.geometry?.boundingBox?.x ?? 0;
+        return ax - bx;
+      });
+      if (n >= 1 && n <= ordered.length) {
+        label = bestRoomDisplayLabel(ordered[n - 1]);
+      }
+    }
+  }
+
+  if (!label) {
+    label = norm;
+  }
+  return label;
+}
+
+/** Turn adjacent ids (room_2, circulation_1) into Kitchen, Foyer, etc. */
+function resolveAdjacentDisplayNames(
+  raw: string[],
+  current: Room,
+  allRooms: Room[],
+  enrichmentRooms?: EnrichmentRoomRef[] | null
+): string[] {
+  if (!raw.length) return [];
+
+  const enrichmentById = buildEnrichmentIdToLabelMap(enrichmentRooms);
+  const tempIdToLabel = new Map<string, string>();
+  const idToLabel = new Map<string, string>();
+  for (const r of allRooms) {
+    const L = bestRoomDisplayLabel(r);
+    idToLabel.set(r.id, L);
+    if (r.detectionTempId) {
+      tempIdToLabel.set(r.detectionTempId, L);
+      tempIdToLabel.set(r.detectionTempId.toLowerCase(), L);
+    }
+  }
+
+  const selfKey = bestRoomDisplayLabel(current).toLowerCase();
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  for (const ref of raw) {
+    const s = String(ref).trim();
+    if (!s) continue;
+    const label = resolveOneAdjacentRef(
+      s,
+      enrichmentById,
+      enrichmentRooms ?? null,
+      tempIdToLabel,
+      idToLabel,
+      allRooms
+    );
+    const k = label.toLowerCase();
+    if (!label || seen.has(k) || k === selfKey) continue;
+    seen.add(k);
+    out.push(label);
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
 export function FloorPlanStage({ projectId, onStageChange }: FloorPlanStageProps) {
   const searchParams = useSearchParams();
   const projectNameFromUrl = searchParams.get('name');
@@ -109,6 +266,8 @@ export function FloorPlanStage({ projectId, onStageChange }: FloorPlanStageProps
   const [progressStage, setProgressStage] = useState<string>('');
   const [progressMessage, setProgressMessage] = useState<string>('');
   const [rooms, setRooms] = useState<Room[]>([]);
+  /** Project-level spatial enrichment `rooms[]` — maps room_2 / circulation_1 to display names */
+  const [enrichmentRoomList, setEnrichmentRoomList] = useState<EnrichmentRoomRef[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<Array<{ severity: string; message: string }>>([]);
   
@@ -147,6 +306,7 @@ export function FloorPlanStage({ projectId, onStageChange }: FloorPlanStageProps
     setIsLoadingRooms(true);
     const result = await getProjectData(targetProjectId);
     if (result.success && result.data) {
+      setEnrichmentRoomList(extractEnrichmentRoomList(result.data.spatialEnrichment));
       if (result.data.rooms && result.data.rooms.length > 0) {
         setRooms(result.data.rooms);
         setHasExistingData(true);
@@ -438,6 +598,7 @@ export function FloorPlanStage({ projectId, onStageChange }: FloorPlanStageProps
         const projectData = await getProjectData(projectIdForPolling);
         if (projectData.success && projectData.data?.rooms && projectData.data.rooms.length > 0) {
           setRooms(projectData.data.rooms);
+          setEnrichmentRoomList(extractEnrichmentRoomList(projectData.data.spatialEnrichment));
           setHasExistingData(true);
           // Don't show error if rooms were successfully detected
         } else {
@@ -512,6 +673,7 @@ export function FloorPlanStage({ projectId, onStageChange }: FloorPlanStageProps
     setPreviewUrl(null);
     setUploadedFile(null);
     setRooms([]);
+    setEnrichmentRoomList(null);
     setWarnings([]);
     setHasExistingData(false);
     setExistingFloorPlanUrl(null);
@@ -539,6 +701,13 @@ export function FloorPlanStage({ projectId, onStageChange }: FloorPlanStageProps
 
   const getRoomTypeLabel = (type: string) => {
     return ROOM_TYPES.find(t => t.value === type)?.label || type;
+  };
+
+  /** Find a dimension-like string in textDetected (e.g. "13'-6\" X 10'-2\"") */
+  const getDimensionTextFromRoom = (room: Room): string | null => {
+    const texts = room.textDetected || [];
+    const dimensionPattern = /\d+[''-]?\d*\s*[""]?\s*[xX×]\s*\d+[''-]?\d*\s*[""]?/;
+    return texts.find((t) => typeof t === 'string' && dimensionPattern.test(t)) ?? null;
   };
 
   const handleReload = () => {
@@ -718,26 +887,45 @@ export function FloorPlanStage({ projectId, onStageChange }: FloorPlanStageProps
                 elevation={0}
                 sx={{ border: 1, borderColor: 'divider' }}
               >
-                <Table sx={{ tableLayout: 'fixed' }}>
+                <Table sx={{ tableLayout: 'auto', minWidth: 720 }}>
                   <TableHead>
                     <TableRow sx={{ backgroundColor: 'action.hover' }}>
-                      <TableCell sx={{ width: 140, fontWeight: 600 }}>Room Type</TableCell>
-                      <TableCell sx={{ width: 80, fontWeight: 600 }} align="center">AI Score</TableCell>
-                      <TableCell sx={{ width: 90, fontWeight: 600 }}>Status</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>AI Reasoning</TableCell>
-                      <TableCell sx={{ width: 90, fontWeight: 600 }} align="center">Actions</TableCell>
+                      <TableCell sx={{ width: 160, fontWeight: 700, fontSize: '0.95rem', py: 1.5 }}>Room Type</TableCell>
+                      <TableCell sx={{ width: 90, fontWeight: 700, fontSize: '0.95rem', py: 1.5 }} align="center">AI Score</TableCell>
+                      <TableCell sx={{ width: 100, fontWeight: 700, fontSize: '0.95rem', py: 1.5 }}>Status</TableCell>
+                      <TableCell sx={{ minWidth: 200, fontWeight: 700, fontSize: '0.95rem', py: 1.5 }}>Dimensions</TableCell>
+                      <TableCell sx={{ minWidth: 280, fontWeight: 700, fontSize: '0.95rem', py: 1.5 }}>Enrichment</TableCell>
+                      <TableCell sx={{ width: 100, fontWeight: 700, fontSize: '0.95rem', py: 1.5 }} align="center">Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {rooms.map((room) => (
+                    {rooms.map((room) => {
+                      const dimensionText = getDimensionTextFromRoom(room);
+                      const adjacentRaw = room.enrichment?.adjacent_to ?? room.adjacentRooms ?? [];
+                      const adjacentList = resolveAdjacentDisplayNames(
+                        adjacentRaw,
+                        room,
+                        rooms,
+                        enrichmentRoomList
+                      );
+                      const labels = (room.textDetected || [])
+                        .filter(
+                          (t) =>
+                            typeof t === 'string' &&
+                            !/^\d+[''-]?\d*\s*[""]?\s*[xX×]/.test(t)
+                        )
+                        .map((t) => t.replace(/^\[Page\s*\d+\]\s*/i, '').trim())
+                        .filter((t) => t.length > 0 && !/^\[?\s*Page\s*\d+\s*\]?$/i.test(t));
+                      const reasoningText = displayReasoning(room.reasoning);
+                      return (
                       <TableRow key={room.id} hover>
-                        <TableCell>
+                        <TableCell sx={{ py: 1.75, verticalAlign: 'top' }}>
                           <FormControl size="small" fullWidth>
                             <Select 
                               value={room.type}
                               onChange={(e) => handleRoomTypeChange(room.id, e.target.value)}
                               size="small"
-                              sx={{ fontSize: '0.875rem' }}
+                              sx={{ fontSize: '0.9375rem' }}
                             >
                               {ROOM_TYPES.map(t => (
                                 <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>
@@ -745,36 +933,116 @@ export function FloorPlanStage({ projectId, onStageChange }: FloorPlanStageProps
                             </Select>
                           </FormControl>
                         </TableCell>
-                        <TableCell align="center">
+                        <TableCell align="center" sx={{ py: 1.75, verticalAlign: 'top' }}>
                           <Chip
                             label={`${Math.round(room.confidence * 100)}%`}
-                            size="small"
+                            size="medium"
                             color={getConfidenceColor(room.confidence)}
                             variant="outlined"
-                            sx={{ fontWeight: 500 }}
+                            sx={{ fontWeight: 600, fontSize: '0.875rem' }}
                           />
                         </TableCell>
-                        <TableCell>
+                        <TableCell sx={{ py: 1.75, verticalAlign: 'top' }}>
                           <Chip
                             label={room.status}
-                            size="small"
+                            size="medium"
                             color={room.status === 'CONFIRMED' ? 'success' : 'default'}
+                            sx={{ fontSize: '0.8125rem', fontWeight: 500 }}
                           />
                         </TableCell>
-                        <TableCell>
-                          <Typography 
-                            variant="caption" 
-                            color="text.secondary" 
-                            sx={{ 
-                              display: 'block',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                            }}
-                            title={room.reasoning || 'No reasoning provided'}
-                          >
-                            {room.reasoning || 'No reasoning provided'}
-                          </Typography>
+                        <TableCell sx={{ py: 1.75, verticalAlign: 'top' }}>
+                          <Box sx={{ lineHeight: 1.5 }}>
+                            {room.enrichment?.dimensions?.length_ft != null || room.enrichment?.dimensions?.width_ft != null ? (
+                              <>
+                                <Typography variant="body1" fontWeight={600} sx={{ fontSize: '1rem' }}>
+                                  {room.enrichment.dimensions.length_ft ?? '?'} × {room.enrichment.dimensions.width_ft ?? '?'} ft
+                                </Typography>
+                                {room.enrichment.area_sqft != null && (
+                                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, fontSize: '0.9375rem' }}>
+                                    {room.enrichment.area_sqft} sqft
+                                  </Typography>
+                                )}
+                              </>
+                            ) : dimensionText ? (
+                              <>
+                                <Typography variant="body1" fontWeight={600} sx={{ fontSize: '1rem' }}>
+                                  {dimensionText}
+                                </Typography>
+                                {room.area != null && room.area > 0 && (
+                                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, fontSize: '0.9375rem' }}>
+                                    ~{Math.round(room.area)} {room.areaUnit || 'sqft'}
+                                  </Typography>
+                                )}
+                              </>
+                            ) : room.area != null && room.area > 0 ? (
+                              <Typography variant="body1" fontWeight={600} sx={{ fontSize: '1rem' }}>
+                                ~{Math.round(room.area)} {room.areaUnit || 'sqft'}
+                              </Typography>
+                            ) : (
+                              <Typography variant="body2" color="text.disabled">—</Typography>
+                            )}
+                          </Box>
+                        </TableCell>
+                        <TableCell sx={{ py: 1.75, verticalAlign: 'top' }}>
+                          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, fontSize: '0.9375rem' }}>
+                            {room.enrichment?.position && (
+                              <Box>
+                                <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: 0.5 }}>Position</Typography>
+                                <Typography variant="body2" fontWeight={500}>{room.enrichment.position}</Typography>
+                              </Box>
+                            )}
+                            {room.enrichment?.openings && (room.enrichment.openings.doors > 0 || room.enrichment.openings.windows > 0) && (
+                              <Box>
+                                <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: 0.5 }}>Openings</Typography>
+                                <Typography variant="body2" fontWeight={500}>{room.enrichment.openings.doors} door{room.enrichment.openings.doors !== 1 ? 's' : ''}, {room.enrichment.openings.windows} window{room.enrichment.openings.windows !== 1 ? 's' : ''}</Typography>
+                              </Box>
+                            )}
+                            {adjacentList.length > 0 && (
+                              <Box>
+                                <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: 0.5 }}>Adjacent ({adjacentList.length})</Typography>
+                                <Typography variant="body2" sx={{ mt: 0.25, lineHeight: 1.4 }} component="span">
+                                  {adjacentList.length <= 6
+                                    ? adjacentList.join(', ')
+                                    : (
+                                        <Tooltip title={adjacentList.join(', ')}>
+                                          <span>{adjacentList.slice(0, 4).join(', ')} +{adjacentList.length - 4} more</span>
+                                        </Tooltip>
+                                      )}
+                                </Typography>
+                              </Box>
+                            )}
+                            {labels.length > 0 && (
+                              <Box>
+                                <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: 0.5 }}>Labels on plan</Typography>
+                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.25 }}>
+                                  {labels.slice(0, 6).map((l, i) => (
+                                    <Chip key={i} label={String(l)} size="small" variant="outlined" sx={{ fontSize: '0.8125rem', height: 24 }} />
+                                  ))}
+                                  {labels.length > 6 && (
+                                    <Tooltip title={labels.slice(6).join(', ')}>
+                                      <Chip label={`+${labels.length - 6}`} size="small" sx={{ fontSize: '0.8125rem', height: 24 }} />
+                                    </Tooltip>
+                                  )}
+                                </Box>
+                              </Box>
+                            )}
+                            {(room.symbolsDetected?.length ?? 0) > 0 && (
+                              <Box>
+                                <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: 0.5 }}>Symbols</Typography>
+                                <Typography variant="body2" sx={{ mt: 0.25 }}>{(room.symbolsDetected ?? []).join(', ')}</Typography>
+                              </Box>
+                            )}
+                            {reasoningText && (
+                              <Tooltip title={reasoningText} enterDelay={400}>
+                                <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', cursor: 'help' }}>
+                                  {reasoningText}
+                                </Typography>
+                              </Tooltip>
+                            )}
+                            {!room.enrichment && adjacentList.length === 0 && labels.length === 0 && (room.symbolsDetected?.length ?? 0) === 0 && !reasoningText && (
+                              <Typography variant="body2" color="text.disabled">—</Typography>
+                            )}
+                          </Box>
                         </TableCell>
                         <TableCell align="center">
                           <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5 }}>
@@ -801,7 +1069,7 @@ export function FloorPlanStage({ projectId, onStageChange }: FloorPlanStageProps
                           </Box>
                         </TableCell>
                       </TableRow>
-                    ))}
+                    ); })}
                   </TableBody>
                 </Table>
               </TableContainer>
