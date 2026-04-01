@@ -191,6 +191,19 @@ export function MoodboardStage({ projectId, onStageChange }: MoodboardStageProps
       
       if (result.success && result.moodboards) {
         setMoodboards(result.moodboards);
+
+        // Keep Redux generation state in sync with stored moodboards so that
+        // cards don't remain "Generating" after a navigation or reload.
+        result.moodboards.forEach((mb) => {
+          dispatch(
+            completeRoomGeneration({
+              roomId: mb.roomId,
+              moodboardId: mb.id,
+              moodboardUrl: mb.imageUrl,
+              moodboardVersion: mb.version || 1,
+            })
+          );
+        });
       }
 
       // Only check for active jobs on initial load, not on refresh

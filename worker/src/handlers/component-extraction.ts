@@ -135,6 +135,11 @@ function normalizeComponentCategory(raw: unknown): ComponentExtractionRow['compo
 
 const VALID_PRICING_TYPES = new Set<PricingType>(['area', 'unit', 'custom']);
 
+// Labour cost guardrails (per line item) in INR.
+// Prevents the model from emitting unrealistic tiny or huge labour values.
+const MIN_LABOUR_COST = 100;
+const MAX_LABOUR_COST = 50000;
+
 function coerceRupee(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return Math.round(value);
@@ -159,7 +164,14 @@ function normalizePricingFields(row: ComponentExtractionRow): ComponentExtractio
     pricingType = 'unit';
   }
   const materialCost = coerceRupee(raw.materialCost);
-  const labourCost = coerceRupee(raw.labourCost);
+  let labourCost = coerceRupee(raw.labourCost);
+
+  // Clamp labour cost into a sensible range when present.
+  if (labourCost > 0 && labourCost < MIN_LABOUR_COST) {
+    labourCost = MIN_LABOUR_COST;
+  } else if (labourCost > MAX_LABOUR_COST) {
+    labourCost = MAX_LABOUR_COST;
+  }
   let totalCost = coerceRupee(raw.totalCost);
   const sum = materialCost + labourCost;
   let notes = String(raw.notes ?? row.notes ?? '').trim();
