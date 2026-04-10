@@ -55,9 +55,13 @@ const handleComponentUpdate = () =>
  *
  * Wires BullMQ jobs to worker handler code (loaded from ../worker/dist/handlers).
  * Worker handlers expect an SQS-style Message; they run in this process and use
- * process.env (e.g. RUNWAY_API_KEY from backend/.env).
+ * process.env (e.g. RUNWAY_API_KEY, GEMINI_API_KEY from backend/.env).
  *
- * SQS worker (standalone worker package) is deprecated; this Redis worker is the one in use.
+ * Product catalog grounding (MOODBOARD, TWO_D_VIEWS): handlers in worker/dist use
+ * PRODUCT_CATALOG_DATABASE_URL. Backend config sets process.env from backend/.env
+ * at startup (see config/index.ts).
+ *
+ * SQS worker (standalone `node` in worker/) is deprecated; use `npm run queue:worker` only.
  */
 
 interface JobData {
@@ -118,6 +122,13 @@ async function updateJobStatusSimple(
   }
 }
 
+class NonRetryableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NonRetryableError';
+  }
+}
+
 async function runSqsHandler(
   handler: (message: Message) => Promise<boolean>,
   jobId: string,
@@ -126,9 +137,17 @@ async function runSqsHandler(
   wrapPayload: boolean = true
 ): Promise<void> {
   const message = buildSqsMessage(jobId, type, payload, wrapPayload);
-  const shouldDelete = await handler(message);
+  let shouldDelete: boolean;
+  try {
+    shouldDelete = await handler(message);
+  } catch (handlerError) {
+    // If the handler itself throws (unexpected), let BullMQ retry
+    throw handlerError;
+  }
 
   if (!shouldDelete) {
+    // shouldDelete=false means the handler determined this is transient and wants a retry.
+    // shouldDelete=true means success or permanent failure (no retry needed).
     throw new Error(`Handler requested retry for ${type} job ${jobId}`);
   }
 }

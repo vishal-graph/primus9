@@ -1,9 +1,9 @@
 'use client';
+import { getAccessToken, getAuthUser, type AuthUser } from '@/lib/auth-client';
 
 import { useEffect, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useAuth } from '@clerk/nextjs';
 import {
   Box,
   Container,
@@ -64,8 +64,7 @@ function CheckoutContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const dispatch = useAppDispatch();
-  const { getToken } = useAuth();
-  const planCode = (searchParams.get('plan') || '').toUpperCase() as PlanCode;
+    const planCode = (searchParams.get('plan') || '').toUpperCase() as PlanCode;
 
   const [plan, setPlan] = useState<PlanInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -89,7 +88,7 @@ function CheckoutContent() {
     }
     const fetchPlans = async () => {
       try {
-        const token = await getToken();
+        const token = getAccessToken();
         const res = await fetch('/api/plans', {
           headers: { Authorization: token ? `Bearer ${token}` : '', 'Content-Type': 'application/json' },
         });
@@ -105,14 +104,14 @@ function CheckoutContent() {
       }
     };
     fetchPlans();
-  }, [planCode, getToken]);
+  }, [planCode]);
 
   const handleApplyCoupon = async () => {
     if (!plan || !couponInput.trim()) return;
     setCouponError('');
     setApplying(true);
     try {
-      const token = await getToken();
+      const token = getAccessToken();
       const res = await fetch('/api/coupons/validate', {
         method: 'POST',
         headers: {
@@ -173,7 +172,7 @@ function CheckoutContent() {
     if (!plan) return;
     setProcessing(true);
     try {
-      const token = await getToken();
+      const token = getAccessToken();
       if (!token) {
         dispatch(showSnackbar({ message: 'Please sign in to continue', severity: 'warning' }));
         setProcessing(false);

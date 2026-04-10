@@ -28,7 +28,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import { UploadDropzone } from './UploadDropzone';
 import { UploadProgressRing } from './UploadProgressRing';
 import { uploadFloorPlan, triggerFloorPlanAnalysis } from '@/lib/actions/floor-plan';
-import { useAuth } from '@clerk/nextjs';
+import { getAccessToken } from '@/lib/auth-client';
 import { Check, Star } from '@mui/icons-material';
 
 export interface PlanOption {
@@ -59,7 +59,7 @@ export function UploadModal({
   isInternal = false,
   plans = [],
 }: UploadModalProps) {
-  const { getToken } = useAuth();
+  // Removed useAuth
   const [projectName, setProjectName] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -106,10 +106,11 @@ export function UploadModal({
 
     try {
       let projectId: string;
+      let slug: string;
       let imageUrl: string;
 
       if (isInternal && selectedPlan) {
-        const token = await getToken();
+        const token = getAccessToken();
         if (!token) {
           setUploadError('Authentication required. Please sign in again.');
           setIsUploading(false);
@@ -129,6 +130,7 @@ export function UploadModal({
           throw new Error(data.error?.message || 'Failed to create project');
         }
         projectId = data.data.id;
+        slug = data.data.slug || projectId;
         setUploadProgress(20);
         const formData = new FormData();
         formData.set('file', file);
@@ -147,6 +149,7 @@ export function UploadModal({
           throw new Error(uploadResult.error || 'Upload failed');
         }
         projectId = uploadResult.projectId;
+        slug = uploadResult.slug || projectId;
         imageUrl = uploadResult.imageUrl;
       }
 
@@ -158,7 +161,7 @@ export function UploadModal({
       setUploadProgress(100);
       setShowCheckmark(true);
       await new Promise((r) => setTimeout(r, 800));
-      onSuccess(projectId, triggerResult.jobId);
+      onSuccess(slug, triggerResult.jobId);
       handleClose();
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : 'Upload failed');

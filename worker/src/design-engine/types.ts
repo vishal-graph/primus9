@@ -30,6 +30,11 @@ export interface DesignIntent {
   decorPreferences: string;
   lightingPreferences: string;
   notes: string;
+  
+  // Practical constraints
+  budget?: string; // Economy, Standard, Premium
+  maintenanceTolerance?: string; // Low, Medium, High
+  executionPriority?: string; // Quality, Speed, Cost
 }
 
 /**
@@ -48,11 +53,31 @@ export interface RegenerationOverrides {
   decor?: string | null;
   lighting?: string | null;
   notes?: string | null;
+  
+  // Practical constraints overrides
+  budget?: string | null;
+  maintenanceTolerance?: string | null;
+  executionPriority?: string | null;
 }
 
 // ===========================================
 // Job Input/Output Types
 // ===========================================
+
+/** Single row match from Supabase product catalog (moodboard / 3D grounding). */
+export interface MoodboardCatalogMatch {
+  table: string;
+  id: string | number;
+  label: string;
+  summary: string;
+  score: number;
+}
+
+export interface MoodboardProductCatalogPayload {
+  promptSection: string;
+  matches: MoodboardCatalogMatch[];
+  resolvedAt: string;
+}
 
 /**
  * Input for moodboard generation job.
@@ -83,6 +108,9 @@ export interface MoodboardJobInput {
   
   /** Version number for this generation (1 for initial, 2+ for regenerations) */
   version?: number;
+
+  /** Optional Supabase catalog grounding (resolved in worker from PRODUCT_CATALOG_DATABASE_URL). */
+  productCatalog?: MoodboardProductCatalogPayload;
   
   /** Metadata from upstream service */
   metadata?: Record<string, unknown>;
@@ -278,6 +306,9 @@ export interface GeminiCallOptions {
   
   /** Abort signal for cancellation */
   abortSignal?: AbortSignal;
+
+  /** Minimum trimmed text length for analyzeContent (default 10; use 1 for short JSON). */
+  minTextLength?: number;
 }
 
 /**

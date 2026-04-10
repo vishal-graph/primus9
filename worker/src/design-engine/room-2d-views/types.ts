@@ -5,6 +5,7 @@
  */
 
 import { RoomElevationGeometry, WallGeometry } from '../elevation/types';
+import { DesignIntent } from '../types';
 
 export type Room2DViewType =
   | 'BIRD_VIEW'
@@ -22,7 +23,13 @@ export interface Room2DViewInput {
   roomGeometry: RoomElevationGeometry;
   moodboardUrl: string;
   connectedRooms: string[];
+  /** Full-floor isometric / interior elevation — locate room, flow, adjacency */
   isometricUrl?: string;
+  /** Optional text from floor-plan spatial enrichment (position, adjacency, openings) */
+  enrichedSpatialNotes?: string;
+  designIntent?: DesignIntent;
+  /** Same catalog block as moodboard (from RoomMoodboard.metadata.productCatalog.promptSection). */
+  productCatalogPrompt?: string;
   version?: number;
 }
 

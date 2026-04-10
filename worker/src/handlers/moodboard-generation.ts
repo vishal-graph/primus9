@@ -19,7 +19,7 @@
  */
 
 import { Message } from '@aws-sdk/client-sqs';
-import { PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import {
   generateMoodboard,
   MoodboardJobInput,
@@ -36,12 +36,20 @@ import {
   RoomContext,
 } from '../design-engine/moodboard/intentMapper';
 import { logger } from '../lib/logger';
+import { getPrisma } from '../lib/prisma';
+import { config } from '../config';
+import { getCatalogPool, resolveProductsForIntent } from '../services/product-catalog';
+import { applyRegenerationOverrides } from '../design-engine/moodboard/buildPrompt';
+import type { MoodboardProductCatalogPayload } from '../design-engine/types';
+import { buildIntentSearchBlob } from '../services/product-catalog/catalogTables';
 
 // ===========================================
-// Database Client
+// Database Client (singleton to avoid exhausting DB connection pool)
 // ===========================================
 
-const prisma = new PrismaClient();
+function prisma() {
+  return getPrisma();
+}
 
 // ===========================================
 // Job Payload Type
@@ -66,7 +74,7 @@ const prisma = new PrismaClient();
  * {
  *   "jobId": "uuid",
  *   "intentPayload": {
- *     "interiorStyles": ["modern"],
+ *     "interiorStyles": ["indian-traditional"],
  *     "mood": "warm-cozy",
  *     ...
  *   },
@@ -227,7 +235,7 @@ export async function handleMoodboardGeneration(
       });
 
       // Fetch Intent Graph from database
-      const intentGraph = await prisma.intentGraph.findUnique({
+      const intentGraph = await prisma().intentGraph.findUnique({
         where: { id: payload.intentGraphId },
       });
 
@@ -320,6 +328,49 @@ export async function handleMoodboardGeneration(
       throw new Error('No designIntent or intentPayload provided in payload');
     }
 
+    const effectiveForCatalog = applyRegenerationOverrides(
+      designIntent,
+      payload.regenerationOverrides
+    );
+    const catalogPool = getCatalogPool(config.productCatalogDatabaseUrl);
+    const catalogResolution = await resolveProductsForIntent(
+      catalogPool,
+      effectiveForCatalog,
+      { strictSofaTiles: config.strictCatalogSofaTiles }
+    );
+
+    if (config.strictCatalogSofaTiles) {
+      const blob = buildIntentSearchBlob(effectiveForCatalog).toLowerCase();
+      const needsSofa = /\b(sofa|sectional|couch|lounge)\b/.test(blob);
+      const needsTile = /\b(tile|tiles|vitrified|flooring)\b/.test(blob);
+      const matches = catalogResolution?.matches || [];
+      const hasSofa = matches.some((m) => m.table === 'sofa_products');
+      const hasTile = matches.some(
+        (m) => m.table === 'mytyles_vitrified_tiles' || m.table === 'flooring_options'
+      );
+      if ((needsSofa && !hasSofa) || (needsTile && !hasTile)) {
+        throw new Error(
+          `STRICT_CATALOG_SOFA_TILES failed: requires sofa=${String(needsSofa)} tile=${String(
+            needsTile
+          )}, resolved sofa=${String(hasSofa)} tile=${String(hasTile)}`
+        );
+      }
+    }
+    const productCatalog: MoodboardProductCatalogPayload | undefined =
+      catalogResolution
+        ? {
+            promptSection: catalogResolution.promptSection,
+            matches: catalogResolution.matches.map((m) => ({
+              table: m.table,
+              id: m.id,
+              label: m.label,
+              summary: m.summary,
+              score: m.score,
+            })),
+            resolvedAt: catalogResolution.resolvedAt,
+          }
+        : undefined;
+
     // Step 3: Build input for Design Engine
     // ============================================================
     // ❗ THIS INPUT GOES DIRECTLY TO generateMoodboard() ❗
@@ -334,6 +385,7 @@ export async function handleMoodboardGeneration(
       referenceImages: payload.referenceImages,
       regenerationOverrides: payload.regenerationOverrides,
       version: payload.version || 1,
+      ...(productCatalog && { productCatalog }),
     };
 
     // Step 4: Generate moodboard using Design Engine
@@ -359,6 +411,7 @@ export async function handleMoodboardGeneration(
       result,
       version: payload.version || 1,
       designIntent,
+      productCatalog,
     });
 
     // Step 7: Update job status to COMPLETED
@@ -419,7 +472,7 @@ async function updateJobStatus(
   data?: { result?: object; error?: object }
 ): Promise<void> {
   try {
-    await prisma.aIJob.update({
+    await prisma().aIJob.update({
       where: { id: jobId },
       data: {
         status,
@@ -467,7 +520,7 @@ async function storeAssetVersion(params: {
     const s3Bucket = process.env.AWS_S3_MOODBOARD_BUCKET || 'tatvaops-moodboards';
     
     // Use upsert to handle version conflicts (regeneration)
-    await prisma.assetVersion.upsert({
+    await prisma().assetVersion.upsert({
       where: {
         projectId_roomId_assetType_version: {
           projectId,
@@ -511,7 +564,7 @@ async function storeAssetVersion(params: {
 
     // Mark previous versions as not latest
     if (version > 1) {
-      await prisma.assetVersion.updateMany({
+      await prisma().assetVersion.updateMany({
         where: {
           projectId,
           roomId,
@@ -550,8 +603,9 @@ async function storeMoodboardInRoom(params: {
   result: MoodboardJobResult;
   version: number;
   designIntent?: DesignIntent;
+  productCatalog?: MoodboardProductCatalogPayload;
 }): Promise<void> {
-  const { jobId, roomId, result, version, designIntent } = params;
+  const { jobId, roomId, result, version, designIntent, productCatalog } = params;
 
   const colorPalette = designIntent?.colorPalette?.split(',').map(c => c.trim()) || [];
   const style = designIntent?.aestheticStyle || 'Generated';
@@ -561,11 +615,18 @@ async function storeMoodboardInRoom(params: {
     durationMs: result.durationMs,
     roomType: designIntent?.roomType,
     themeMood: designIntent?.themeMood,
-  };
+    ...(productCatalog && {
+      productCatalog: {
+        promptSection: productCatalog.promptSection,
+        matches: productCatalog.matches as unknown as Prisma.InputJsonValue,
+        resolvedAt: productCatalog.resolvedAt,
+      },
+    }),
+  } as Prisma.InputJsonValue;
 
   try {
     // Use upsert to handle regeneration (same room + version)
-    await prisma.roomMoodboard.upsert({
+    await prisma().roomMoodboard.upsert({
       where: {
         roomId_version: {
           roomId,
@@ -616,8 +677,8 @@ async function storeMoodboardInRoom(params: {
 // ===========================================
 
 /**
- * Cleanup database connection on shutdown.
+ * Cleanup (no-op when using shared Prisma singleton; connection is managed by worker lifecycle).
  */
 export async function cleanupMoodboardHandler(): Promise<void> {
-  await prisma.$disconnect();
+  // Do not disconnect: we use getPrisma() singleton shared across handlers.
 }

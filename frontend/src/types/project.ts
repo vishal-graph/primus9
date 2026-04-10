@@ -17,6 +17,7 @@ export type ProjectStage =
 export interface Project {
   id: string;
   userId: string;
+  slug?: string;
   name: string;
   currentStage: ProjectStage;
   createdAt: Date;
@@ -97,7 +98,7 @@ export const STAGE_CONFIGS: StageConfig[] = [
   },
   {
     stage: 'TWO_D_VIEWS',
-    label: '2D Views',
+    label: '3D Views',
     description: 'Generate 5-point room views',
     icon: 'image',
     requiresPreviousStage: true,

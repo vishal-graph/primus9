@@ -1,0 +1,134 @@
+// Prisma Schema for TatvaOps Auth Service
+// Shared database with main backend — auth-related models only
+//
+// IMPORTANT: This schema is a SUBSET of the main schema (backend/prisma/schema.prisma)
+// It only defines models the auth-service needs to read/write.
+// Run migrations from the BACKEND prisma directory, not here.
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USER PERSONA ENUM
+// ============================================
+enum UserPersona {
+  HOMEOWNER
+  INTERIOR_DESIGNER
+  REAL_ESTATE_DEVELOPER
+  CONTRACTOR
+}
+
+enum UserPlan {
+  FREE
+  STARTER
+  STANDARD
+  PRO
+  PREMIUM
+  PROFESSIONAL
+  ENTERPRISE
+  NEW_YEAR_UNLIMITED_2025
+}
+
+// ============================================
+// USER (Core identity model)
+// ============================================
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String?
+  avatarUrl String?
+  plan      UserPlan @default(FREE)
+
+  // Legacy Clerk field — kept for migration compatibility, nullable
+  clerkId String? @unique
+
+  // New OAuth fields
+  googleId     String?  @unique
+  authProvider String   @default("google") // "google" | "clerk"
+
+  // Internal employee flags
+  isInternal   Boolean @default(false)
+  internalRole String?
+
+  // Profile
+  phone      String?
+  bio        String?
+  location   String?
+  website    String?
+  company    String?
+  occupation String?
+  onboarded  Boolean @default(false) // Legacy Clerk onboarding flag
+
+  // Extended onboarding fields (NEW)
+  phoneNumber      String?
+  whatsappNumber   String?
+  locationLat      Float?
+  locationLng      Float?
+  formattedAddress String?
+  pincode          String?
+  persona          UserPersona?
+  onboardingCompleted Boolean @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  businessProfile BusinessProfile?
+  refreshTokens   RefreshToken[]
+
+  @@index([clerkId])
+  @@index([googleId])
+  @@index([email])
+  @@index([createdAt])
+}
+
+// ============================================
+// BUSINESS PROFILE (Created during onboarding)
+// ============================================
+model BusinessProfile {
+  id     String @id @default(uuid())
+  userId String @unique
+
+  companyName           String?
+  portfolioLink         String?
+  monthlyProjectVolume  String?  // "1-3" | "4-10" | "10+"
+  gstNumber             String?
+  businessPhone         String?
+  businessLocationLat   Float?
+  businessLocationLng   Float?
+  businessAddress       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ============================================
+// REFRESH TOKENS (Rotation-based security)
+// ============================================
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique  // SHA-256 hash of the raw token (never store raw)
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?           // Set when rotated or upon logout
+  userAgent String?             // Browser/device hint for security display
+  ipAddress String?             // IP when issued
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@index([expiresAt])
+}

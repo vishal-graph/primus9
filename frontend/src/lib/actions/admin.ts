@@ -7,7 +7,7 @@
 
 'use server';
 
-import { auth } from '@clerk/nextjs/server';
+import { getServerAuthHeaders } from '@/lib/server-auth';
 import { getApiBase } from '../api-base';
 
 // ============================================
@@ -118,12 +118,11 @@ export interface PaginatedResponse<T> {
  * Get auth headers for API requests
  */
 async function getAuthHeaders() {
-  const { getToken } = auth();
-  const token = await getToken();
+  const authHeaders = await getServerAuthHeaders();
 
   return {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
+    ...(authHeaders || {}),
   };
 }
 

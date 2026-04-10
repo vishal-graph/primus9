@@ -2,6 +2,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { config } from '../config';
 import { Logger } from '../lib/logger';
+import { getPrisma } from '../lib/prisma';
 
 /**
  * Interior View Generation Handler
@@ -75,11 +76,9 @@ export async function handleInteriorViewGeneration(
     if (spatialPlanId) {
       // NEW PATH: Use SpatialPlan from Think Layer
       logger.info('Using SpatialPlan from Think Layer', { spatialPlanId });
-      
-      // Import PrismaClient and fetch SpatialPlan
-      const { PrismaClient } = await import('@prisma/client');
-      const prisma = new PrismaClient();
-      
+
+      const prisma = getPrisma();
+
       const spatialPlan = await prisma.spatialPlan.findUnique({
         where: { id: spatialPlanId },
         include: { intentGraph: true },
@@ -96,8 +95,6 @@ export async function handleInteriorViewGeneration(
 
       // Build prompt from SpatialPlan
       prompt = buildInteriorViewPromptFromSpatialPlan(spatialPlan, roomId, viewAngle);
-      
-      await prisma.$disconnect();
     } else {
       // EXISTING PATH: Use traditional style-based approach
       logger.info('Using traditional style-based approach');

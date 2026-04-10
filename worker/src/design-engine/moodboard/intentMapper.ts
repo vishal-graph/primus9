@@ -136,6 +136,12 @@ export function mapIntentToDesignIntent(
   // Additional context from lifestyle/constraints
   const notes = buildNotes(intentPayload, roomContext);
 
+  // === PRACTICAL CONSTRAINTS ===
+  // Map and normalize budget tiers
+  const budget = normalizeBudget(intentPayload.budgetRange);
+  const maintenanceTolerance = intentPayload.maintenanceTolerance;
+  const executionPriority = intentPayload.executionPriority;
+
   const designIntent: DesignIntent = {
     roomType: formatRoomType(roomContext.roomType),
     aestheticStyle,
@@ -147,6 +153,9 @@ export function mapIntentToDesignIntent(
     decorPreferences,
     lightingPreferences,
     notes,
+    budget,
+    maintenanceTolerance,
+    executionPriority,
   };
 
   logger.debug('Mapped intent to design intent', {
@@ -162,36 +171,60 @@ export function mapIntentToDesignIntent(
 // FIELD MAPPING HELPERS
 // ===========================================
 
+/** Short labels for the 4 interior styles (used when combined with sub-category) */
+const INTERIOR_STYLE_LABELS: Record<string, string> = {
+  'indian-traditional': 'Indian',
+  western: 'Western',
+  'middle-eastern': 'Middle Eastern',
+  eastern: 'Eastern',
+};
+
+/** Prompt-ready descriptions when only style is set (no sub-category) */
+const INTERIOR_STYLE_PROMPT_DESCRIPTIONS: Record<string, string> = {
+  'indian-traditional':
+    'Indian (e.g. Kerala style, Jammu style, Rajasthani, Indian contemporary, Indian modern)',
+  western: 'Western (US, Latin American & European)',
+  'middle-eastern':
+    'Middle Eastern (e.g. Turkey, Morocco, Monaco, Dubai, Qatar)',
+  eastern: 'Eastern (e.g. Japanese, Chinese)',
+};
+
+/** Format sub-category value to title case (e.g. kerala → Kerala) */
+function formatSubCategory(value: string): string {
+  return value
+    .split('-')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
 /**
- * Build aesthetic style string from interior styles + cultural influence.
+ * Build aesthetic style string from interior style + sub-category.
+ * Intent form is source of truth: when both are set, output one explicit contextual phrase
+ * (e.g. "Indian – Kerala style"). When only style is set, use full description.
  */
 function buildAestheticStyle(intent: IntentPayload): string {
-  const parts: string[] = [];
+  const style = intent.interiorStyles?.[0];
+  const subCategory = intent.culturalInfluence && intent.culturalInfluence !== 'none'
+    ? intent.culturalInfluence
+    : '';
 
-  // Primary styles
-  if (intent.interiorStyles && intent.interiorStyles.length > 0) {
-    // Convert kebab-case to Title Case
-    const formattedStyles = intent.interiorStyles
-      .map(s => s.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '))
-      .join(', ');
-    parts.push(formattedStyles);
+  // Both style and sub-category set → single contextual label (source of truth)
+  if (style && subCategory) {
+    const styleLabel = INTERIOR_STYLE_LABELS[style] ?? formatSubCategory(style);
+    const subLabel = formatSubCategory(subCategory);
+    const suffix = style === 'indian-traditional' ? ' style' : '';
+    return `${styleLabel} – ${subLabel}${suffix}`;
   }
 
-  // Cultural influence
-  if (intent.culturalInfluence && intent.culturalInfluence !== 'none') {
-    const formattedCulture = intent.culturalInfluence
-      .split('-')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
-    parts.push(`with ${formattedCulture} influences`);
+  // Only style set → use full description
+  if (style) {
+    return (
+      INTERIOR_STYLE_PROMPT_DESCRIPTIONS[style] ??
+      formatSubCategory(style)
+    );
   }
 
-  // Fallback
-  if (parts.length === 0) {
-    return 'Contemporary, Clean-lined';
-  }
-
-  return parts.join(' ');
+  return 'Contemporary, Clean-lined';
 }
 
 /**
@@ -409,16 +442,20 @@ function getRoomSpecificFurniture(roomType: string): string {
 function buildDecorPreferences(intent: IntentPayload, roomContext: RoomContext): string {
   const parts: string[] = [];
 
-  // Base decor based on style
-  if (intent.interiorStyles?.includes('minimalist')) {
-    parts.push('Minimal decor, carefully curated pieces');
-  } else if (intent.interiorStyles?.includes('bohemian')) {
-    parts.push('Eclectic decor, plants, textiles, collected items');
-  } else if (intent.interiorStyles?.includes('modern')) {
-    parts.push('Contemporary art, sculptural pieces');
-  } else if (intent.interiorStyles?.includes('traditional')) {
-    parts.push('Classic decorative elements, framed artwork, traditional accessories');
-  } else {
+  // Base decor from the 4 interior style categories
+  if (intent.interiorStyles?.includes('indian-traditional')) {
+    parts.push('Indian/Traditional decor: handwoven textiles, jali screens, brass accents, terracotta, regional crafts (Kerala, Rajasthani, etc.)');
+  }
+  if (intent.interiorStyles?.includes('western')) {
+    parts.push('Western decor: US/Latin/European influences, contemporary art, clean lines or classic pieces');
+  }
+  if (intent.interiorStyles?.includes('middle-eastern')) {
+    parts.push('Middle Eastern decor: Turkish, Moroccan, Arabian influences, geometric patterns, lanterns, rich textiles');
+  }
+  if (intent.interiorStyles?.includes('eastern')) {
+    parts.push('Eastern decor: Japanese, Chinese influences, minimal zen, natural materials, subtle ornament');
+  }
+  if (parts.length === 0) {
     parts.push('Balanced decorative elements, personal touches');
   }
 
@@ -508,9 +545,11 @@ function buildNotes(intent: IntentPayload, roomContext: RoomContext): string {
     notes.push('Accessibility considerations for elderly');
   }
 
-  // Budget context (high level only)
-  if (intent.budgetRange === 'budget' || intent.budgetRange === 'moderate') {
-    notes.push('Cost-effective solutions preferred');
+  // Budget context: must-haves first for budget-friendly
+  if (intent.budgetRange === 'budget') {
+    notes.push('Prioritize must-haves and functionality; aesthetics secondary. Cost-effective, durable solutions.');
+  } else if (intent.budgetRange === 'moderate') {
+    notes.push('Balance must-haves and aesthetics. Cost-effective solutions preferred.');
   } else if (intent.budgetRange === 'luxury' || intent.budgetRange === 'ultra-luxury') {
     notes.push('Premium materials and finishes');
   }
@@ -530,6 +569,26 @@ function buildNotes(intent: IntentPayload, roomContext: RoomContext): string {
   }
 
   return notes.join('. ');
+}
+
+/**
+ * Normalize UI budget tiers to internal design engine tiers.
+ */
+function normalizeBudget(budgetRange?: string): string {
+  if (!budgetRange) return 'Standard';
+
+  switch (budgetRange) {
+    case 'budget':
+      return 'Economy';
+    case 'moderate':
+      return 'Standard';
+    case 'premium':
+    case 'luxury':
+    case 'ultra-luxury':
+      return 'Premium';
+    default:
+      return 'Standard';
+  }
 }
 
 /**

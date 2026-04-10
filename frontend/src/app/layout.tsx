@@ -1,17 +1,14 @@
 /**
  * TatvaOps Vision - Root Layout
- * 
+ *
  * Enterprise SaaS aesthetic with:
  * - Material UI theme
  * - Redux state management
- * - Clerk authentication
+ * - Clerk auth (useUser, useClerk, useAuth via ClerkProvider in Providers)
  * - Global providers
- * 
- * Visual inspiration: Apple iCloud, Google Cloud Console, Linear
  */
 
 import type { Metadata, Viewport } from 'next';
-import { ClerkProvider } from '@clerk/nextjs';
 import { Providers } from '@/providers';
 
 import './globals.css';
@@ -39,16 +36,13 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // Always use ClerkProvider - it handles missing keys gracefully in development
   return (
-    <ClerkProvider>
-      <html lang="en" suppressHydrationWarning>
-        <body>
-          <Providers>
-            {children}
-          </Providers>
-        </body>
-      </html>
-    </ClerkProvider>
+    <html lang="en" suppressHydrationWarning>
+      <body>
+        <Providers>
+          {children}
+        </Providers>
+      </body>
+    </html>
   );
 }

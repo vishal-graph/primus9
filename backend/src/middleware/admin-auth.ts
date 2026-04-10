@@ -5,7 +5,6 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { clerkClient } from '@clerk/clerk-sdk-node';
 import { logger } from '../lib/logger';
 
 /**
@@ -26,34 +25,37 @@ export async function adminAuthMiddleware(
   next: NextFunction
 ): Promise<void> {
   try {
-    const clerkUserId = req.clerkUserId;
-
-    // Check if user is authenticated
-    if (!clerkUserId) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
       res.status(401).json({
         success: false,
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Authentication required',
-        },
+        error: { code: 'UNAUTHORIZED', message: 'Authentication required' },
       });
       return;
     }
 
-    // Get user from Clerk to check email domain
-    const clerkUser = await clerkClient.users.getUser(clerkUserId);
-    
-    // Get primary email address
-    const primaryEmail = clerkUser.emailAddresses.find(
-      (email) => email.id === clerkUser.primaryEmailAddressId
-    );
+    const token = authHeader.substring(7);
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      res.status(401).json({
+        success: false,
+        error: { code: 'UNAUTHORIZED', message: 'Invalid token format' },
+      });
+      return;
+    }
 
-    const userEmail = primaryEmail?.emailAddress || null;
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = Buffer.from(base64, 'base64').toString('utf8');
+    const payload = JSON.parse(jsonPayload);
 
-    // Check if email is @tatvaops.com domain
-    if (!isTatvaOpsEmail(userEmail)) {
+    const userEmail = payload.email || null;
+    const isInternal = payload.isInternal || false;
+
+    // Check if email is @tatvaops.com domain or marked as internal in JWT
+    if (!userEmail || (!isTatvaOpsEmail(userEmail) && !isInternal)) {
       logger.warn(
-        { clerkUserId, email: userEmail },
+        { userId: payload.userId, email: userEmail },
         'Non-admin user attempted to access admin route'
       );
 
@@ -70,7 +72,7 @@ export async function adminAuthMiddleware(
     // User is admin, log access and continue
     logger.info(
       { 
-        clerkUserId, 
+        userId: payload.userId, 
         email: userEmail, 
         path: req.path,
         method: req.method,

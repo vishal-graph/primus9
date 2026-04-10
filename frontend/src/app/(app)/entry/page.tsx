@@ -11,7 +11,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useAuth } from '@clerk/nextjs';
+import { getAccessToken } from '@/lib/auth-client';
 import { motion } from 'framer-motion';
 import { Box, Typography, Button } from '@mui/material';
 import { GridView, CloudUpload, Dashboard as DashboardIcon } from '@mui/icons-material';
@@ -24,7 +24,7 @@ const HERO_GRADIENT = 'linear-gradient(135deg, #1a0f0a 0%, #0a0604 50%, #000000 
 
 export default function EntryPage() {
   const router = useRouter();
-  const { getToken, isSignedIn } = useAuth();
+  const [isSignedIn, setIsSignedIn] = useState(false);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [showUploadingOverlay, setShowUploadingOverlay] = useState(false);
   const [isInternal, setIsInternal] = useState(false);
@@ -33,8 +33,12 @@ export default function EntryPage() {
   useEffect(() => {
     const fetchUserAndPlans = async () => {
       try {
-        const token = await getToken();
-        if (!token) return;
+        const token = getAccessToken();
+        if (!token) {
+          setIsSignedIn(false);
+          return;
+        }
+        setIsSignedIn(true);
         const [userRes, plansRes] = await Promise.all([
           fetch('/api/user/me', { headers: { Authorization: `Bearer ${token}` } }),
           fetch('/api/plans', { headers: { Authorization: `Bearer ${token}` } }),
@@ -48,7 +52,7 @@ export default function EntryPage() {
       }
     };
     fetchUserAndPlans();
-  }, [getToken]);
+  }, []);
 
   const handleUploadStarted = () => {
     setShowUploadingOverlay(true);
@@ -58,10 +62,10 @@ export default function EntryPage() {
     setShowUploadingOverlay(false);
   };
 
-  const handleUploadSuccess = (projectId: string, jobId: string) => {
+  const handleUploadSuccess = (slug: string) => {
     setUploadModalOpen(false);
     setShowUploadingOverlay(false);
-    router.push(`/upload/success?projectId=${projectId}&jobId=${jobId}`);
+    router.push(`/project/${slug}/processing`);
   };
 
   return (

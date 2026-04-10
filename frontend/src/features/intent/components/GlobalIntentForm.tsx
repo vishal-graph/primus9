@@ -10,7 +10,7 @@
 
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, type MouseEvent } from 'react';
 import {
   Box,
   Typography,
@@ -42,7 +42,6 @@ import {
 } from '@mui/material';
 import { Close, Check, Done } from '@mui/icons-material';
 import {
-  AutoAwesome,
   Lock,
   Info,
   Palette,
@@ -50,7 +49,6 @@ import {
   Lightbulb,
   People,
   AttachMoney,
-  ImageSearch,
 } from '@mui/icons-material';
 import { motion } from 'framer-motion';
 import { useAppDispatch, useAppSelector } from '@/store';
@@ -62,8 +60,8 @@ import {
 } from '@/store/slices/intentSlice';
 import {
   INTERIOR_STYLES,
+  INTERIOR_STYLE_SUBCATEGORIES,
   MOOD_OPTIONS,
-  CULTURAL_INFLUENCES,
   COLOR_PALETTES,
   ACCENT_COLORS,
   MATERIALS,
@@ -81,11 +79,20 @@ import {
 } from '@/constants/intent-options';
 import { slideFromBottomVariants } from '@/motion/pageTransitions';
 
+/** Room shape needed to compute BHK for budget default */
+interface RoomForBhk {
+  type: string;
+}
+
 interface GlobalIntentFormProps {
   projectId: string;
   isLocked?: boolean;
   onSubmit: (payload: Partial<IntentPayload>) => Promise<void>;
   isSubmitting?: boolean;
+  /** Rooms from floor plan; used to set budget from BHK (≤2 → budget, 3 → moderate, 4+ → luxury) */
+  rooms?: RoomForBhk[];
+  /** When provided (e.g. in "Generate Remaining" dialog), prefill form with this payload so user can edit */
+  initialPayload?: Partial<IntentPayload>;
 }
 
 // Form section component
@@ -194,6 +201,21 @@ function MultiSelectChips({
     setOpen(false);
   };
 
+  const handleSelectAll = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (disabled) return;
+    const all = options.map((o) => o.value);
+    onChange(maxSelection ? all.slice(0, maxSelection) : all);
+  };
+
+  const handleClearAll = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (disabled) return;
+    onChange([]);
+  };
+
   const getChipColor = (index: number) => {
     return CHIP_COLORS[index % CHIP_COLORS.length];
   };
@@ -262,12 +284,13 @@ function MultiSelectChips({
           </Box>
         )}
       >
-        {/* Header with selection count and Done button */}
+        {/* Header with selection count, select all / clear, and Done */}
         <ListSubheader
+          onMouseDown={(e) => e.stopPropagation()}
           sx={{
             display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
+            flexDirection: 'column',
+            gap: 0.75,
             backgroundColor: 'background.paper',
             borderBottom: 1,
             borderColor: 'divider',
@@ -275,25 +298,51 @@ function MultiSelectChips({
             position: 'sticky',
             top: 0,
             zIndex: 1,
+            lineHeight: 1.2,
           }}
         >
-          <Typography variant="caption" color="text.secondary">
-            {value.length} selected{maxSelection ? ` (max ${maxSelection})` : ''}
-          </Typography>
-          <Button
-            size="small"
-            variant="contained"
-            startIcon={<Done />}
-            onClick={handleClose}
-            sx={{ 
-              minWidth: 80,
-              textTransform: 'none',
-              boxShadow: 'none',
-              '&:hover': { boxShadow: 'none' },
-            }}
-          >
-            Done
-          </Button>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1 }}>
+            <Typography variant="caption" color="text.secondary">
+              {value.length} selected{maxSelection ? ` (max ${maxSelection})` : ''}
+            </Typography>
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<Done />}
+              onClick={handleClose}
+              sx={{
+                minWidth: 80,
+                textTransform: 'none',
+                boxShadow: 'none',
+                '&:hover': { boxShadow: 'none' },
+              }}
+            >
+              Done
+            </Button>
+          </Box>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
+            <Button
+              size="small"
+              variant="text"
+              disabled={disabled || options.length === 0}
+              onClick={handleSelectAll}
+              sx={{ textTransform: 'none', minWidth: 0, px: 0.75 }}
+            >
+              Select all
+            </Button>
+            <Typography variant="caption" color="text.disabled">
+              ·
+            </Typography>
+            <Button
+              size="small"
+              variant="text"
+              disabled={disabled || value.length === 0}
+              onClick={handleClearAll}
+              sx={{ textTransform: 'none', minWidth: 0, px: 0.75 }}
+            >
+              Clear
+            </Button>
+          </Box>
         </ListSubheader>
 
         {options.map((option, index) => {
@@ -355,18 +404,17 @@ function MultiSelectChips({
   );
 }
 
-export function GlobalIntentForm({ 
-  projectId, 
-  isLocked = false,
-  onSubmit,
-  isSubmitting = false,
-}: GlobalIntentFormProps) {
-  const dispatch = useAppDispatch();
-  const globalIntent = useAppSelector(selectGlobalIntent);
-  const payload = globalIntent?.payload || {};
+/** Derive default budget from BHK: ≤2 → budget, 3 → moderate, 4+ → luxury */
+function getDefaultBudgetFromBhk(rooms?: RoomForBhk[]): string {
+  if (!rooms?.length) return '';
+  const bhk = rooms.filter((r) => r.type === 'BEDROOM').length;
+  if (bhk <= 2) return 'budget';
+  if (bhk < 4) return 'moderate';
+  return 'luxury';
+}
 
-  // Local form state for controlled inputs
-  const [formData, setFormData] = useState<Partial<IntentPayload>>({
+function getFormDefaultsFromPayload(payload: Partial<IntentPayload>, defaultBudget: string) {
+  return {
     interiorStyles: payload.interiorStyles || [],
     mood: payload.mood || '',
     culturalInfluence: payload.culturalInfluence || '',
@@ -387,48 +435,45 @@ export function GlobalIntentForm({
     hasPets: payload.hasPets || false,
     workFromHome: payload.workFromHome || false,
     entertainmentFocus: payload.entertainmentFocus || 'medium',
-    budgetRange: payload.budgetRange || '',
+    budgetRange: payload.budgetRange || defaultBudget || '',
     executionPriority: payload.executionPriority || 'design',
     maintenanceTolerance: payload.maintenanceTolerance || 'medium',
-  });
+  };
+}
 
-  // Update form when payload changes (e.g., when existing intent is loaded)
+export function GlobalIntentForm({ 
+  projectId, 
+  isLocked = false,
+  onSubmit,
+  isSubmitting = false,
+  rooms = [],
+  initialPayload,
+}: GlobalIntentFormProps) {
+  const dispatch = useAppDispatch();
+  const globalIntent = useAppSelector(selectGlobalIntent);
+  const defaultBudget = getDefaultBudgetFromBhk(rooms);
+  // Prefer initialPayload (e.g. from "Generate Remaining" dialog) so form is prefilled with last data
+  const payload = initialPayload ?? globalIntent?.payload ?? {};
+
+  // Local form state for controlled inputs — seed from initialPayload or Redux so user sees last filled data
+  const [formData, setFormData] = useState<Partial<IntentPayload>>(() =>
+    getFormDefaultsFromPayload(payload, defaultBudget || '')
+  );
+
+  // Set budget from BHK when rooms available and no budget in payload yet
   useEffect(() => {
-    console.log('[GlobalIntentForm] useEffect triggered');
-    console.log('[GlobalIntentForm] globalIntent:', globalIntent);
-    console.log('[GlobalIntentForm] payload:', payload);
-    
-    if (globalIntent?.payload && Object.keys(globalIntent.payload).length > 0) {
-      console.log('[GlobalIntentForm] ✅ Updating form with payload:', globalIntent.payload);
-      setFormData({
-        interiorStyles: payload.interiorStyles || [],
-        mood: payload.mood || '',
-        culturalInfluence: payload.culturalInfluence || '',
-        primaryColorPalette: payload.primaryColorPalette || '',
-        secondaryAccents: payload.secondaryAccents || '',
-        preferredMaterials: payload.preferredMaterials || [],
-        textures: payload.textures || '',
-        furnitureStyle: payload.furnitureStyle || '',
-        comfortVsAesthetics: payload.comfortVsAesthetics ?? 50,
-        layoutPreference: payload.layoutPreference || 'mixed',
-        storagePreference: (payload.storagePreference || 'medium') as 'low' | 'medium' | 'high',
-        naturalLightImportance: payload.naturalLightImportance ?? 70,
-        artificialLightingStyle: payload.artificialLightingStyle || '',
-        lightTemperature: (payload.lightTemperature || 'warm') as 'warm' | 'cool' | 'neutral',
-        householdType: payload.householdType || 'family',
-        hasKids: payload.hasKids || false,
-        hasElders: payload.hasElders || false,
-        hasPets: payload.hasPets || false,
-        workFromHome: payload.workFromHome || false,
-        entertainmentFocus: payload.entertainmentFocus || 'medium',
-        budgetRange: payload.budgetRange || '',
-        executionPriority: payload.executionPriority || 'design',
-        maintenanceTolerance: payload.maintenanceTolerance || 'medium',
-      });
-    } else {
-      console.log('[GlobalIntentForm] ⚠️ No payload to load or payload is empty');
+    if (!defaultBudget) return;
+    setFormData((prev) => (prev.budgetRange ? prev : { ...prev, budgetRange: defaultBudget }));
+    if (!payload.budgetRange) dispatch(updateGlobalIntent({ budgetRange: defaultBudget }));
+  }, [defaultBudget, payload.budgetRange, dispatch]);
+
+  // Update form when payload changes (e.g., when existing intent is loaded or dialog opens with initialPayload)
+  useEffect(() => {
+    const source = payload && Object.keys(payload).length > 0 ? payload : null;
+    if (source) {
+      setFormData(getFormDefaultsFromPayload(source, defaultBudget || ''));
     }
-  }, [globalIntent?.payload, payload]);
+  }, [initialPayload ?? globalIntent?.payload, defaultBudget]);
 
   const handleFieldChange = useCallback(<K extends keyof IntentPayload>(
     field: K,
@@ -471,13 +516,24 @@ export function GlobalIntentForm({
       >
         <Grid container spacing={2.5}>
           <Grid item xs={12}>
-            <MultiSelectChips
-              label="Interior Styles (select up to 3)"
-              options={INTERIOR_STYLES}
-              value={formData.interiorStyles || []}
-              onChange={(vals) => handleFieldChange('interiorStyles', vals.slice(0, 3))}
-              disabled={disabled}
-            />
+            <Typography variant="body2" gutterBottom sx={{ fontWeight: 600 }}>
+              Interior Style
+            </Typography>
+            <RadioGroup
+              row
+              value={formData.interiorStyles?.[0] ?? ''}
+              onChange={(e) => handleFieldChange('interiorStyles', e.target.value ? [e.target.value] : [])}
+             >
+              {INTERIOR_STYLES.map((opt) => (
+                <FormControlLabel
+                  key={opt.value}
+                  value={opt.value}
+                  control={<Radio size="small" disabled={disabled} />}
+                  label={opt.label}
+                  sx={{ mr: 3 }}
+                />
+              ))}
+            </RadioGroup>
           </Grid>
           <Grid item xs={12} sm={6}>
             <FormControl fullWidth size="small" disabled={disabled}>
@@ -495,14 +551,30 @@ export function GlobalIntentForm({
           </Grid>
           <Grid item xs={12} sm={6}>
             <FormControl fullWidth size="small" disabled={disabled}>
-              <InputLabel>Cultural Influence (Optional)</InputLabel>
+              <InputLabel id="style-subcategory-label" shrink>
+                Style sub-category (optional)
+              </InputLabel>
               <Select
+                labelId="style-subcategory-label"
                 value={formData.culturalInfluence || ''}
                 onChange={(e) => handleFieldChange('culturalInfluence', e.target.value)}
-                label="Cultural Influence (Optional)"
+                label="Style sub-category (optional)"
+                displayEmpty
+                renderValue={(v) => (v === '' ? 'None' : undefined)}
               >
-                {CULTURAL_INFLUENCES.map((opt) => (
-                  <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+                <MenuItem value="">
+                  <em>None</em>
+                </MenuItem>
+                {(() => {
+                  const raw = formData.interiorStyles?.flatMap(
+                    (s) => INTERIOR_STYLE_SUBCATEGORIES[s] ?? []
+                  ) ?? [];
+                  const byValue = new Map(raw.map((o) => [o.value, o]));
+                  return Array.from(byValue.values());
+                })().map((opt) => (
+                  <MenuItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </MenuItem>
                 ))}
               </Select>
             </FormControl>
@@ -837,7 +909,7 @@ export function GlobalIntentForm({
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={12}>
+          <Grid item xs={12}> 
             <Typography variant="body2" gutterBottom>
               Execution Priority
             </Typography>
@@ -857,27 +929,6 @@ export function GlobalIntentForm({
             </RadioGroup>
           </Grid>
         </Grid>
-      </FormSection>
-
-      {/* G. AI Assist (Optional) */}
-      <FormSection
-        icon={<ImageSearch />}
-        title="AI Assist (Optional)"
-        description="Upload reference images for AI-powered suggestions"
-      >
-        <Alert severity="info" sx={{ mb: 2 }}>
-          <Typography variant="body2">
-            Coming soon: Upload reference images or paste Pinterest/Instagram links for AI to analyze and auto-fill preferences.
-          </Typography>
-        </Alert>
-        <Button
-          variant="outlined"
-          startIcon={<AutoAwesome />}
-          disabled
-          sx={{ textTransform: 'none' }}
-        >
-          Analyze & Auto-Fill (Coming Soon)
-        </Button>
       </FormSection>
 
       {/* Submit Button */}

@@ -1,41 +1,52 @@
-/**
- * TatvaOps Vision - Sign Up Page
- * 
- * Clerk sign-up component wrapped in MUI for consistency
- */
+'use client';
 
-import { SignUp } from '@clerk/nextjs';
-import { Box } from '@mui/material';
+import { Box, Button, Typography, alpha } from '@mui/material';
+import { loginWithGoogle } from '@/lib/auth-client';
+import GoogleIcon from '@mui/icons-material/Google';
 
 export default function SignUpPage() {
   return (
     <Box
       sx={{
         display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
         justifyContent: 'center',
-        '& .cl-rootBox': {
-          width: '100%',
-        },
-        '& .cl-card': {
-          boxShadow: 'none !important',
-          border: 'none !important',
-        },
+        width: '100%',
+        maxWidth: 400,
+        margin: 'auto',
+        textAlign: 'center',
+        p: 4,
+        borderRadius: 3,
+        bgcolor: 'background.paper',
+        boxShadow: `0 8px 32px ${alpha('#000', 0.08)}`,
       }}
     >
-      <SignUp
-        afterSignUpUrl="/entry"
-        appearance={{
-          elements: {
-            rootBox: 'w-full',
-            card: 'shadow-none border-0',
-            headerTitle: 'text-2xl font-semibold',
-            headerSubtitle: 'text-gray-600',
-            socialButtonsBlockButton: 'border border-gray-200 hover:bg-gray-50',
-            formButtonPrimary: 'bg-primary hover:bg-primary-dark',
-            footerActionLink: 'text-primary hover:text-primary-dark',
-          },
+      <Typography variant="h5" sx={{ mb: 1, fontWeight: 700 }}>
+        Create an account
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
+        Join TatvaOps Vision to get started
+      </Typography>
+      
+      <Button 
+        fullWidth
+        variant="contained" 
+        startIcon={<GoogleIcon />}
+        onClick={() => loginWithGoogle()}
+        sx={{ 
+          textTransform: 'none', 
+          fontWeight: 600, 
+          py: 1.5,
+          bgcolor: 'primary.main',
+          color: 'primary.contrastText',
+          '&:hover': {
+            bgcolor: 'primary.dark',
+          }
         }}
-      />
+      >
+        Sign up with Google
+      </Button>
     </Box>
   );
 }

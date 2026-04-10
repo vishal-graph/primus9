@@ -87,7 +87,7 @@ const STAGES: StageItem[] = [
   },
   {
     stage: 'TWO_D_VIEWS',
-    label: '2D Views',
+    label: '3D Views',
     icon: <ViewInAr />,
     description: 'Room wall views',
   },
@@ -161,7 +161,9 @@ export function AppSidebar({ open, onClose, variant, width }: AppSidebarProps) {
     const status = getStageStatus(stage, comingSoon);
     if (status === 'locked') return;
     
-    router.push(`/project/${projectId}?stage=${stage.toLowerCase()}`);
+    const slug = currentProject?.slug || projectId;
+    const pathStage = stage.toLowerCase().replace('_', '-');
+    router.push(`/project/${slug}/${pathStage}`);
     
     if (variant === 'temporary') {
       onClose();

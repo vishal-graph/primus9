@@ -1,41 +1,53 @@
-/**
- * TatvaOps Vision - Sign In Page
- * 
- * Clerk sign-in component wrapped in MUI for consistency
- */
+'use client';
 
-import { SignIn } from '@clerk/nextjs';
-import { Box } from '@mui/material';
+import { Box, Button, Typography, alpha } from '@mui/material';
+import { loginWithGoogle } from '@/lib/auth-client';
+import GoogleIcon from '@mui/icons-material/Google';
 
 export default function SignInPage() {
   return (
     <Box
       sx={{
         display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
         justifyContent: 'center',
-        '& .cl-rootBox': {
-          width: '100%',
-        },
-        '& .cl-card': {
-          boxShadow: 'none !important',
-          border: 'none !important',
-        },
+        width: '100%',
+        maxWidth: 400,
+        margin: 'auto',
+        textAlign: 'center',
+        p: 4,
+        borderRadius: 3,
+        bgcolor: 'background.paper',
+        boxShadow: `0 8px 32px ${alpha('#000', 0.08)}`,
       }}
     >
-      <SignIn
-        afterSignInUrl="/entry"
-        appearance={{
-          elements: {
-            rootBox: 'w-full',
-            card: 'shadow-none border-0',
-            headerTitle: 'text-2xl font-semibold',
-            headerSubtitle: 'text-gray-600',
-            socialButtonsBlockButton: 'border border-gray-200 hover:bg-gray-50',
-            formButtonPrimary: 'bg-primary hover:bg-primary-dark',
-            footerActionLink: 'text-primary hover:text-primary-dark',
-          },
+      <Typography variant="h5" sx={{ mb: 1, fontWeight: 700 }}>
+        Welcome back
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
+        Sign in to continue to TatvaOps Vision
+      </Typography>
+      
+      <Button 
+        fullWidth
+        variant="outlined" 
+        startIcon={<GoogleIcon />}
+        onClick={() => loginWithGoogle()}
+        sx={{ 
+          textTransform: 'none', 
+          fontWeight: 600, 
+          py: 1.5,
+          color: 'text.primary',
+          borderColor: 'divider',
+          '&:hover': {
+            bgcolor: 'action.hover',
+            borderColor: 'text.primary'
+          }
         }}
-      />
+      >
+        Continue with Google
+      </Button>
     </Box>
   );
 }

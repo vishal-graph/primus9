@@ -12,6 +12,7 @@
 
 import { DesignIntent, RegenerationOverrides } from '../types';
 import { createHash } from 'crypto';
+import { getRoomContext } from '../common/roomContext';
 
 // ===========================================
 // Prompt Building
@@ -44,7 +45,27 @@ export function applyRegenerationOverrides(
     decorPreferences: overrides.decor ?? intent.decorPreferences,
     lightingPreferences: overrides.lighting ?? intent.lightingPreferences,
     notes: overrides.notes ?? intent.notes,
+    budget: overrides.budget ?? intent.budget,
+    maintenanceTolerance: overrides.maintenanceTolerance ?? intent.maintenanceTolerance,
+    executionPriority: overrides.executionPriority ?? intent.executionPriority,
   };
+}
+
+/**
+ * Design priority line by budget: must-haves first for Economy, balance for Standard, aesthetics lead for Premium.
+ */
+function getDesignPriorityLine(budget?: string): string {
+  const b = (budget || '').toLowerCase();
+  if (b === 'economy') {
+    return 'Design priority: Must-haves first (functionality, durability, easy maintenance, essential elements); aesthetics within these constraints.';
+  }
+  if (b === 'standard') {
+    return 'Design priority: Balance must-haves and aesthetics.';
+  }
+  if (b === 'premium') {
+    return 'Design priority: Aesthetics and premium materials can lead; include statement pieces and refined finishes.';
+  }
+  return '';
 }
 
 /**
@@ -57,15 +78,28 @@ export function applyRegenerationOverrides(
  * PRESERVED FROM: moodboard-main/app/api/moodboard/route.ts lines 55-107
  * 
  * @param intent - Design parameters (optionally with overrides applied)
+ * @param options.catalogSection - Optional Supabase catalog block (injected after intent, before layout).
  * @returns The complete prompt string
  */
-export function buildMoodboardPrompt(intent: DesignIntent): string {
+export function buildMoodboardPrompt(
+  intent: DesignIntent,
+  options?: { catalogSection?: string }
+): string {
+  const catalogTrimmed = options?.catalogSection?.trim();
+  const catalogPrefix = catalogTrimmed ? ['', catalogTrimmed, ''] : [];
+
   // PRESERVED: Exact prompt structure from moodboard-main
   // Lines 56-105 from moodboard-main/app/api/moodboard/route.ts
   const promptLines = [
-    // Opening instruction
     'Create a high-resolution interior design moodboard in a dense collage style with overlapping images, torn paper edges, pinned swatches, taped corners, textured backgrounds, and no empty space. Use the following extracted design inputs:',
-    'IMPORTANT: Use Indian interior design context and references for the room. Prefer Indian materials, finishes, textiles, craftsmanship, and decor motifs (e.g., cane, jali patterns, brass, terracotta, teak/rosewood, handwoven textiles, local ceramics, Indian art). Avoid Western-centric or Euro-American decor references.',
+    'CRITICAL: Generate exclusively within an authentic, practical Indian residential context. Adhere STRICTLY to the following demographic and architectural rules:',
+    '1. MATERIALS & FINISHES: Use practical Indian surfaces like vitrified tiles, Kota stone, marble, terrazzo, or teak/sheesham wood. Avoid wall-to-wall carpeting, distressed rustic farmhouse wood, or faux-brick walls.',
+    '2. TROPICAL CLIMATE: Ensure spaces look adapted for Indian climates (e.g., cross-ventilation, ceiling fans, or sheer curtains). **If windows are shown**, they must include practical elements like security grills. Avoid fireplaces, heavy velvet drapes, or thick woolen rugs.',
+    '3. DEMOGRAPHIC USAGE: If Hall/Living, emphasize communal seating (diwans, large sofas), prominent TV units, and integrated Pooja/Mandir spaces. If Kitchen, ensure heavy-duty wet areas, deep sinks, and extensive closed lofts for spices. If Bathroom, mandate wet/dry separation (slope/glass), health faucets (bidet sprays), and anti-skid tiles. If Balcony, include drying racks or jhoolas (swings).',
+    '4. AESTHETICS: Avoid Euro-American centric decor. Lean into Indian crafts, handwoven textiles (Ikat, block prints), jali partition screens, brass accents, and terracotta decor where appropriate.',
+    '5. INDIAN HOME USAGE: Reflect how Indian homes are used: multi-use spaces, TV as focal point in living areas, Pooja/Mandir integration, kitchen as high-use zone with storage for Indian cooking, balcony/utility for drying clothes, and multi-generational use where relevant.',
+    '6. MAINTENANCE: Use materials and finishes that are easy to maintain in Indian conditions (dust, humidity, frequent cleaning). Avoid high-maintenance or delicate options; prefer wipeable, durable surfaces that Indian homeowners can maintain easily.',
+    getRoomContext(intent),
     '',
     // Design parameters
     `Room Type: ${intent.roomType}`,
@@ -78,7 +112,10 @@ export function buildMoodboardPrompt(intent: DesignIntent): string {
     `Decor: ${intent.decorPreferences}`,
     `Lighting: ${intent.lightingPreferences}`,
     intent.notes ? `Notes: ${intent.notes}` : '',
+    getDesignPriorityLine(intent.budget),
+    'APPLY EVERYTHING: The Indian context, budget priority, and usage/maintenance rules above are mandatory and set the overall priority—but do NOT neglect or overlook any design component. You MUST fully apply ALL of the following from the user intent: furniture, lighting, materials, color palette, textures, decor, and theme/mood. Every component listed in this prompt must be reflected in the moodboard; the top rules are the framework, and all other parameters are required.',
     '',
+    ...catalogPrefix,
     // Layout instructions
     'Arrange fabric swatches, material tiles, inspiration photos, lighting samples, sketches, and palette strips in a cohesive, magazine-style moodboard layout. Use soft shadows and overlapping composition to match high-end interior design collage boards.',
     '',

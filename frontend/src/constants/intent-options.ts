@@ -9,26 +9,28 @@
 // A. OVERALL STYLE DIRECTION
 // ============================================
 
+/** Interior style direction: 4 regional/cultural categories for prompt creation */
 export const INTERIOR_STYLES = [
-  { value: 'modern', label: 'Modern' },
-  { value: 'contemporary', label: 'Contemporary' },
-  { value: 'minimalist', label: 'Minimalist' },
-  { value: 'scandinavian', label: 'Scandinavian' },
-  { value: 'industrial', label: 'Industrial' },
-  { value: 'mid-century-modern', label: 'Mid-Century Modern' },
-  { value: 'traditional', label: 'Traditional' },
-  { value: 'transitional', label: 'Transitional' },
-  { value: 'bohemian', label: 'Bohemian' },
-  { value: 'coastal', label: 'Coastal' },
-  { value: 'farmhouse', label: 'Farmhouse' },
-  { value: 'rustic', label: 'Rustic' },
-  { value: 'art-deco', label: 'Art Deco' },
-  { value: 'japanese', label: 'Japanese/Zen' },
-  { value: 'mediterranean', label: 'Mediterranean' },
-  { value: 'indian-contemporary', label: 'Indian Contemporary' },
-  { value: 'indian-traditional', label: 'Indian Traditional' },
-  { value: 'luxury', label: 'Luxury/Glam' },
-  { value: 'eclectic', label: 'Eclectic' },
+  {
+    value: 'indian-traditional',
+    label: 'Indian',
+    description: 'Kerala, Jammu, Rajasthani, Indian contemporary, Indian modern, etc.',
+  },
+  {
+    value: 'western',
+    label: 'Western',
+    description: 'US, Latin & European',
+  },
+  {
+    value: 'middle-eastern',
+    label: 'Middle Eastern',
+    description: 'Turkey, Morocco, Monaco, Dubai, Qatar, etc.',
+  },
+  {
+    value: 'eastern',
+    label: 'Eastern',
+    description: 'Japanese, Chinese, etc.',
+  },
 ];
 
 export const MOOD_OPTIONS = [
@@ -44,20 +46,40 @@ export const MOOD_OPTIONS = [
   { value: 'energetic-dynamic', label: 'Energetic & Dynamic' },
 ];
 
-export const CULTURAL_INFLUENCES = [
-  { value: 'none', label: 'No specific influence' },
-  { value: 'indian', label: 'Indian' },
-  { value: 'japanese', label: 'Japanese' },
-  { value: 'moroccan', label: 'Moroccan' },
-  { value: 'scandinavian', label: 'Scandinavian' },
-  { value: 'mediterranean', label: 'Mediterranean' },
-  { value: 'chinese', label: 'Chinese' },
-  { value: 'african', label: 'African' },
-  { value: 'south-american', label: 'South American' },
-  { value: 'middle-eastern', label: 'Middle Eastern' },
-  { value: 'european-classic', label: 'European Classic' },
-  { value: 'american-traditional', label: 'American Traditional' },
-];
+/** Sub-categories under each of the 4 interior styles (replaces Cultural Influence) */
+export const INTERIOR_STYLE_SUBCATEGORIES: Record<string, Array<{ value: string; label: string }>> = {
+  'indian-traditional': [
+    { value: 'kerala', label: 'Kerala' },
+    { value: 'goan', label: 'Goan' },
+    { value: 'rajasthani', label: 'Rajasthani' },
+    { value: 'indian-contemporary', label: 'Indian Contemporary' },
+    { value: 'indian-modern', label: 'Indian Modern' },
+    { value: 'jammu', label: 'Jammu / North Indian' },
+    { value: 'bengali', label: 'Bengali' },
+    { value: 'gujarati', label: 'Gujarati' },
+    { value: 'south-indian', label: 'South Indian (generic)' },
+  ],
+  western: [
+    { value: 'us', label: 'US' },
+    { value: 'latin-american', label: 'Latin American' },
+    { value: 'european', label: 'European' },
+    { value: 'scandinavian', label: 'Scandinavian' },
+    { value: 'mediterranean', label: 'Mediterranean' },
+    { value: 'french', label: 'French' },
+    { value: 'italian', label: 'Italian' },
+  ],
+  'middle-eastern': [
+    { value: 'turkish', label: 'Turkish' },
+    { value: 'moroccan', label: 'Moroccan' },
+    { value: 'arabian', label: 'Arabian (Dubai, Qatar)' },
+    { value: 'monaco', label: 'Monaco' },
+  ],
+  eastern: [
+    { value: 'japanese', label: 'Japanese' },
+    { value: 'chinese', label: 'Chinese' },
+    { value: 'zen', label: 'Zen / Minimal Eastern' },
+  ],
+};
 
 // ============================================
 // B. COLOR & MATERIAL PREFERENCES
@@ -203,13 +225,11 @@ export const ENTERTAINMENT_FOCUS = [
 // F. BUDGET & PRACTICAL CONSTRAINTS
 // ============================================
 
+/** Budget tiers only; auto-set from floor plan BHK (≤2 → budget, 3 → moderate, 4+ → luxury) */
 export const BUDGET_RANGES = [
   { value: 'budget', label: 'Budget-Friendly (Under ₹5L)' },
-  { value: 'moderate', label: 'Moderate (₹5L - ₹15L)' },
-  { value: 'premium', label: 'Premium (₹15L - ₹30L)' },
-  { value: 'luxury', label: 'Luxury (₹30L - ₹50L)' },
-  { value: 'ultra-luxury', label: 'Ultra Luxury (₹50L+)' },
-  { value: 'not-specified', label: 'Prefer not to specify' },
+  { value: 'moderate', label: 'Moderate (₹5L – ₹15L)' },
+  { value: 'luxury', label: 'Luxury (₹15L+)' },
 ];
 
 export const EXECUTION_PRIORITIES = [

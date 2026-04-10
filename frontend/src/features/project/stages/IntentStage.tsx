@@ -721,9 +721,12 @@ export function IntentStage({ projectId, onStageChange }: IntentStageProps) {
                       Fill or adjust design preferences for the {rooms.length - moodboardCount} remaining rooms. These settings will be used to generate moodboards for the whole house.
                     </Typography>
                     <GlobalIntentForm
+                      key={showRemainingFormDialog ? 'remaining-form-open' : 'remaining-form-closed'}
                       projectId={projectId}
+                      rooms={rooms}
                       isLocked={false}
                       isSubmitting={isSubmitting}
+                      initialPayload={globalIntent?.payload}
                       onSubmit={async (payload) => {
                         setIsSubmitting(true);
                         setError(null);
@@ -945,6 +948,7 @@ export function IntentStage({ projectId, onStageChange }: IntentStageProps) {
       {intentMode === 'GLOBAL' && (
         <GlobalIntentForm
           projectId={projectId}
+          rooms={rooms}
           isLocked={globalIntent?.status === 'LOCKED'}
           onSubmit={handleGlobalIntentSubmit}
           isSubmitting={isSubmitting || anyRoomGenerating}

@@ -60,7 +60,7 @@ async function buildRunwayDynamicPrompt(input: GenerateWalkthroughInput): Promis
 }
 
 /**
- * Generate walkthrough video for a single room (Runway Gen-4 Turbo only).
+ * Generate walkthrough video for a single room (Runway Gen-4.5 image-to-video).
  * Requires RUNWAY_API_KEY and a bird's-eye 2D view signed URL.
  */
 export async function generateWalkthrough(
@@ -78,64 +78,30 @@ export async function generateWalkthrough(
   logger.info('Starting walkthrough generation (Runway)', {
     roomName: input.roomName,
     roomType: input.roomType,
-    primarySource: 'prompt',
-    birdViewImage: 'reference and visualization only',
-    flow: 'gen4_turbo → gen4_aleph',
+    flow: 'gen4.5 image-to-video',
   });
 
   const promptText = await buildRunwayDynamicPrompt(input);
   if (promptText.length > 1000) {
     throw new Error('Runway prompt must be ≤1000 characters');
   }
-  logger.info('Runway walkthrough: bird’s-eye prompt is primary; bird view image is reference only', {
-    roomName: input.roomName,
-    promptLength: promptText.length,
-  });
-
+  
   const runway = new RunwayClient(input.runwayApiKey);
 
-  // Step 1: gen4_turbo image_to_video — minimal prompt to get a short clip from bird view
-  const minimalPrompt =
-    'Interior room. Same layout and style as the reference image. Slight, smooth camera motion.';
-  const { videoData: refVideoBuffer } = await runway.generateVideo(
+  // Direct image-to-video (Gen-4.5)
+  const { videoData, mimeType } = await runway.generateVideo(
     input.firstViewSignedUrl,
     {
-      duration: 5,
+      duration: 10,
       ratio: '1280:720',
-      promptText: minimalPrompt,
+      promptText: promptText,
     }
-  );
-  logger.info('Step 1 (gen4_turbo) done; uploading ref video for step 2', {
-    refSize: refVideoBuffer.length,
-  });
-
-  // Upload ref video to S3 so we have an HTTPS URI for video_to_video (≤2048 chars)
-  const tempKey = `temp/runway-ref/${randomUUID()}.mp4`;
-  await uploadToS3({
-    bucket: input.rendersBucket,
-    key: tempKey,
-    body: refVideoBuffer,
-    contentType: 'video/mp4',
-  });
-  const refVideoUrl = await generateSignedUrl(input.rendersBucket, tempKey, 3600);
-  if (refVideoUrl.length > 2048) {
-    throw new Error(
-      `Ref video signed URL too long for Runway (${refVideoUrl.length} > 2048). Use shorter expiry or Runway upload.`
-    );
-  }
-
-  // Step 2: gen4_aleph video_to_video — prompt is primary; bird view image is reference only
-  const { videoData, mimeType } = await runway.generateVideoFromVideo(
-    refVideoUrl,
-    promptText,
-    input.firstViewSignedUrl
   );
 
   const generationTimeMs = Date.now() - startTime;
-  logger.info('Walkthrough video generated (Runway gen4_aleph)', {
+  logger.info('Walkthrough video generated (Runway gen4.5)', {
     generationTimeMs,
     videoSize: videoData.length,
-    primarySource: 'prompt',
   });
 
   return {

@@ -4,7 +4,7 @@
 
 'use server';
 
-import { auth } from '@clerk/nextjs/server';
+import { getServerAuthHeaders } from '@/lib/server-auth';
 import { getApiBase } from '@/lib/api-base';
 
 export type Room2DViewType =
@@ -40,13 +40,12 @@ export async function getRoom2DViews(
   roomId: string
 ): Promise<{ success: boolean; views?: Room2DView[]; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
-    if (!token) return { success: false, error: 'Not authenticated' };
+    const headers = await getServerAuthHeaders();
+    if (!headers) return { success: false, error: 'Not authenticated' };
 
     const response = await fetch(
       `${getApiBase()}/api/projects/${projectId}/rooms/${roomId}/2d-views`,
-      { headers: { Authorization: `Bearer ${token}` } }
+      { headers }
     );
 
     if (!response.ok) {
@@ -68,13 +67,12 @@ export async function getProject2DViews(
   projectId: string
 ): Promise<{ success: boolean; views?: Room2DView[]; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
-    if (!token) return { success: false, error: 'Not authenticated' };
+    const headers = await getServerAuthHeaders();
+    if (!headers) return { success: false, error: 'Not authenticated' };
 
     const response = await fetch(
       `${getApiBase()}/api/projects/${projectId}/2d-views`,
-      { headers: { Authorization: `Bearer ${token}` } }
+      { headers }
     );
 
     if (!response.ok) {
@@ -94,18 +92,16 @@ export async function getProject2DViews(
 
 export async function triggerRoom2DViewsGeneration(
   projectId: string,
-  roomId: string,
-  version?: number
+  roomId: string
 ): Promise<{ success: boolean; jobId?: string; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
-    if (!token) return { success: false, error: 'Not authenticated' };
+    const headers = await getServerAuthHeaders();
+    if (!headers) return { success: false, error: 'Not authenticated' };
 
     const response = await fetch(`${getApiBase()}/api/jobs`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        ...headers,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -115,7 +111,6 @@ export async function triggerRoom2DViewsGeneration(
         payload: {
           projectId,
           roomId,
-          version: version || 1,
         },
       }),
     });
@@ -140,13 +135,12 @@ export async function getActiveTwoDViewsJobs(
   projectId: string
 ): Promise<{ success: boolean; jobs?: TwoDViewsJob[]; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
-    if (!token) return { success: false, error: 'Not authenticated' };
+    const headers = await getServerAuthHeaders();
+    if (!headers) return { success: false, error: 'Not authenticated' };
 
     const response = await fetch(
       `${getApiBase()}/api/jobs?projectId=${projectId}&type=TWO_D_VIEWS&status=QUEUED,PROCESSING`,
-      { headers: { Authorization: `Bearer ${token}` } }
+      { headers }
     );
 
     if (!response.ok) {

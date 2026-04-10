@@ -29,6 +29,7 @@ import { publicRouter } from './api/public';
 import { exportsRouter } from './api/exports';
 import { senseRouter } from './api/sense';
 import { thinkRouter } from './api/think';
+import { catalogRouter } from './api/catalog';
 import plansRouter from './api/plans';
 import billingRouter from './api/billing';
 import couponsRouter from './api/coupons';
@@ -78,6 +79,7 @@ app.use('/api/feedback', authMiddleware, feedbackRouter);
 app.use('/api/exports', authMiddleware, exportsRouter);
 app.use('/api/sense', authMiddleware, senseRouter);
 app.use('/api/think', authMiddleware, thinkRouter);
+app.use('/api/catalog', authMiddleware, catalogRouter);
 
 // Admin routes (with @tatvaops.com email validation)
 app.use('/api/admin', authMiddleware, adminAuthMiddleware, adminRouter);

@@ -669,27 +669,20 @@ function updateAdjacencyFromGraph(
 }
 
 /**
- * Infer additional adjacency relationships from geometry
- * Two rooms are adjacent if their bounding boxes are close or overlapping
+ * Infer adjacency from geometry using wall-sharing heuristics.
+ * Old logic treated any overlapping/near boxes as adjacent → one room linked to almost everything.
+ * Now: only pairs that share a plausible wall (small gap + substantial edge overlap).
+ * Overlapping boxes are skipped (sloppy AI boxes / same space).
  */
 function inferAdjacencyFromGeometry(rooms: DetectedRoom[]): void {
-  const ADJACENCY_THRESHOLD = 50; // Pixels
-  
   for (let i = 0; i < rooms.length; i++) {
     for (let j = i + 1; j < rooms.length; j++) {
       const roomA = rooms[i];
       const roomB = rooms[j];
-      
-      // Skip if already adjacent
+
       if (roomA.adjacentRooms.includes(roomB.tempId)) continue;
-      
-      // Check if bounding boxes are close
-      const boxA = roomA.geometry.boundingBox;
-      const boxB = roomB.geometry.boundingBox;
-      
-      const distance = getBoxDistance(boxA, boxB);
-      
-      if (distance < ADJACENCY_THRESHOLD) {
+
+      if (areBoundingBoxesWallAdjacent(roomA.geometry.boundingBox, roomB.geometry.boundingBox)) {
         roomA.adjacentRooms.push(roomB.tempId);
         roomB.adjacentRooms.push(roomA.tempId);
       }
@@ -698,36 +691,48 @@ function inferAdjacencyFromGeometry(rooms: DetectedRoom[]): void {
 }
 
 /**
- * Calculate minimum distance between two bounding boxes
+ * True if two axis-aligned boxes likely share a wall (not merely "somewhere on the same plan").
  */
-function getBoxDistance(a: BoundingBox, b: BoundingBox): number {
-  const aRight = a.x + a.width;
-  const aBottom = a.y + a.height;
-  const bRight = b.x + b.width;
-  const bBottom = b.y + b.height;
-  
-  // Check if boxes overlap
-  if (a.x < bRight && aRight > b.x && a.y < bBottom && aBottom > b.y) {
-    return 0;
+function areBoundingBoxesWallAdjacent(a: BoundingBox, b: BoundingBox): boolean {
+  const ax2 = a.x + a.width;
+  const ay2 = a.y + a.height;
+  const bx2 = b.x + b.width;
+  const by2 = b.y + b.height;
+
+  const xOverlap = Math.min(ax2, bx2) - Math.max(a.x, b.x);
+  const yOverlap = Math.min(ay2, by2) - Math.max(a.y, b.y);
+
+  // Heavy overlap → unreliable for adjacency (nested / duplicate boxes)
+  if (xOverlap > 0 && yOverlap > 0) {
+    const interArea = xOverlap * yOverlap;
+    const areaA = a.width * a.height;
+    const areaB = b.width * b.height;
+    const smaller = Math.min(areaA, areaB);
+    if (smaller > 0 && interArea / smaller > 0.45) {
+      return false;
+    }
+    // Any 2D overlap without clear wall — skip auto-link
+    return false;
   }
-  
-  // Calculate horizontal and vertical distances
-  let dx = 0;
-  let dy = 0;
-  
-  if (aRight < b.x) {
-    dx = b.x - aRight;
-  } else if (bRight < a.x) {
-    dx = a.x - bRight;
+
+  const minH = Math.min(a.height, b.height);
+  const minW = Math.min(a.width, b.width);
+  const gapMax = Math.min(40, Math.max(10, Math.min(minW, minH) * 0.06));
+  const minEdgeOverlapRatio = 0.28;
+
+  const gapX = xOverlap < 0 ? -xOverlap : 0;
+  const gapY = yOverlap < 0 ? -yOverlap : 0;
+
+  // Share a vertical wall: separated horizontally, overlap vertically
+  if (gapX > 0 && gapX <= gapMax && yOverlap >= minH * minEdgeOverlapRatio) {
+    return true;
   }
-  
-  if (aBottom < b.y) {
-    dy = b.y - aBottom;
-  } else if (bBottom < a.y) {
-    dy = a.y - bBottom;
+  // Share a horizontal wall: separated vertically, overlap horizontally
+  if (gapY > 0 && gapY <= gapMax && xOverlap >= minW * minEdgeOverlapRatio) {
+    return true;
   }
-  
-  return Math.sqrt(dx * dx + dy * dy);
+
+  return false;
 }
 
 // ============================================

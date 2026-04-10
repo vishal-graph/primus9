@@ -10,6 +10,8 @@
  * ============================================================
  */
 
+import { DesignIntent } from '../types';
+
 // ===========================================
 // Room Data Types
 // ===========================================
@@ -194,6 +196,9 @@ export interface IsometricJobInput {
   
   /** Original floor plan image URL (for geometry reference) */
   floorPlanImageUrl?: string;
+  
+  /** Design intent/preferences */
+  designIntent?: DesignIntent;
   
   /** Floor number */
   floor?: number;

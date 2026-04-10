@@ -31,7 +31,6 @@ import {
 } from './geometryValidator';
 import { mapFloorStyles } from './styleMapper';
 import { buildIsometricPrompt, buildSimplifiedPrompt, buildLayoutConstrainedPrompt, validatePrompt } from './promptBuilder';
-import { calculateArchitecturalAccuracy } from './architecturalAccuracy';
 import { renderFloorLayout, renderIsometricLayout } from './layoutRenderer';
 import { getGeminiClient } from '../common/gemini-client';
 import { logger } from '../../lib/logger';
@@ -41,14 +40,17 @@ import { logger } from '../../lib/logger';
 // ===========================================
 
 const ACCURACY_CONFIG = {
-  /** Minimum acceptable architectural accuracy. 0.95 was too strict (almost every run retried 3x); 0.85 accepts good layout match while still retrying clear misses. */
+  /** Used only if VALIDATE_ACCURACY is true (for logging / future use) */
   MIN_ACCURACY: 0.85,
-  
-  /** Maximum retry attempts for low accuracy */
-  MAX_RETRIES: 3,
-  
-  /** Enable accuracy validation (set to false to skip) */
-  VALIDATE_ACCURACY: true,
+
+  /** Single generation pass — no threshold-based retries (was 3; user-requested: one realistic output per job) */
+  MAX_RETRIES: 1,
+
+  /**
+   * When false: one Gemini image call, accept result (no post-check retries).
+   * Accuracy scoring can be re-enabled for telemetry without increasing MAX_RETRIES.
+   */
+  VALIDATE_ACCURACY: false,
 };
 
 // ===========================================
@@ -153,7 +155,7 @@ export async function generateIsometricElevation(
     
     logger.info('Stage 3: Building generation prompt');
     
-    const fullPrompt = buildIsometricPrompt(validatedGeometry, styleMap);
+    const fullPrompt = buildIsometricPrompt(validatedGeometry, styleMap, input.designIntent);
     
     if (!validatePrompt(fullPrompt)) {
       throw new IsometricGenerationError(
@@ -262,170 +264,62 @@ export async function generateIsometricElevation(
     });
 
     // ===========================================
-    // 4c: Generate with Accuracy Validation Loop
+    // 4c: Single Gemini image generation (no retries / no accuracy loop)
     // ===========================================
-    
-    let attempts = 0;
-    let bestImage: { data: string; mimeType: string; accuracy: number } | null = null;
-    
-    while (attempts < ACCURACY_CONFIG.MAX_RETRIES) {
-      attempts++;
-      
-      logger.info(`Generation attempt ${attempts}/${ACCURACY_CONFIG.MAX_RETRIES}`);
 
-      try {
-        const geminiClient = getGeminiClient();
-        
-        // Build layout-constrained prompt
-        const constrainedPrompt = buildLayoutConstrainedPrompt(
-          validatedGeometry,
-          styleMap,
-          attempts > 1 // Stricter prompt on retries
-        );
-        
-        // Build reference images array (PNG/JPEG only)
-        const referenceImages: Array<{ data: string; mimeType: string }> = [];
-        
-        // 1. Layout reference image (PNG)
-        if (layoutImage) {
-          referenceImages.push(layoutImage);
-          logger.info('Added layout image as reference', { mimeType: layoutImage.mimeType });
-        }
-        
-        // 2. Original floor plan (additional reference)
-        if (floorPlanImage && !floorPlanImage.mimeType.includes('svg')) {
-          referenceImages.push(floorPlanImage);
-          logger.info('Added floor plan as reference');
-        }
-        
-        // 3. Moodboards (for styling only) - filter out any SVG
-        const validMoodboards = moodboardImages.filter(m => !m.mimeType.includes('svg'));
-        referenceImages.push(...validMoodboards.map(m => ({ data: m.data, mimeType: m.mimeType })));
-        
-        logger.info('Calling Gemini with references', {
-          referenceCount: referenceImages.length,
-          moodboardCount: validMoodboards.length,
-          attempt: attempts,
-          promptLength: constrainedPrompt.length,
-        });
-        
-        // Generate image
-        const result = await geminiClient.generateImageWithReferences(
-          constrainedPrompt,
-          referenceImages,
-          {
-            timeoutMs: 180000, // 3 minutes
-          }
-        );
+    try {
+      const geminiClient = getGeminiClient();
 
-        imageData = result.imageData;
-        mimeType = result.mimeType || 'image/png';
+      const constrainedPrompt = buildLayoutConstrainedPrompt(
+        validatedGeometry,
+        styleMap,
+        input.designIntent,
+        false
+      );
 
-        // ===========================================
-        // Validate Architectural Accuracy
-        // ===========================================
-        
-        if (ACCURACY_CONFIG.VALIDATE_ACCURACY) {
-          logger.info('Validating architectural accuracy');
-          
-          try {
-            architecturalAccuracy = await calculateArchitecturalAccuracy(
-              imageData,
-              mimeType,
-              validatedGeometry
-            );
-            
-            logger.info('Accuracy validation result', {
-              accuracy: architecturalAccuracy,
-              threshold: ACCURACY_CONFIG.MIN_ACCURACY,
-              passed: architecturalAccuracy >= ACCURACY_CONFIG.MIN_ACCURACY,
-              attempt: attempts,
-            });
+      const referenceImages: Array<{ data: string; mimeType: string }> = [];
 
-            // Track best result
-            if (!bestImage || architecturalAccuracy > bestImage.accuracy) {
-              bestImage = { data: imageData, mimeType, accuracy: architecturalAccuracy };
-            }
-
-            // Check if accuracy meets threshold
-            if (architecturalAccuracy >= ACCURACY_CONFIG.MIN_ACCURACY) {
-              logger.info('Accuracy threshold met! Generation successful.', {
-                accuracy: architecturalAccuracy,
-                attempts,
-              });
-              break; // Success!
-            } else {
-              logger.warn('Accuracy below threshold, will retry', {
-                accuracy: architecturalAccuracy,
-                threshold: ACCURACY_CONFIG.MIN_ACCURACY,
-                remainingAttempts: ACCURACY_CONFIG.MAX_RETRIES - attempts,
-              });
-            }
-          } catch (accuracyError) {
-            logger.warn('Accuracy calculation failed, assuming 80%', {
-              error: String(accuracyError),
-            });
-            architecturalAccuracy = 0.80;
-            
-            if (!bestImage) {
-              bestImage = { data: imageData, mimeType, accuracy: 0.80 };
-            }
-          }
-        } else {
-          // Skip accuracy validation
-          architecturalAccuracy = undefined;
-          bestImage = { data: imageData, mimeType, accuracy: 1.0 };
-          break;
-        }
-
-      } catch (genError) {
-        const errorMessage = genError instanceof Error ? genError.message : String(genError);
-        
-        logger.error('Generation attempt failed', {
-          attempt: attempts,
-          error: errorMessage,
-        });
-        
-        // If this is the last attempt, throw
-        if (attempts >= ACCURACY_CONFIG.MAX_RETRIES) {
-          throw new IsometricGenerationError(
-            IsometricErrorCode.IMAGE_GENERATION_FAILED,
-            `Image generation failed after ${attempts} attempts: ${errorMessage}`,
-            true,
-            { originalError: errorMessage }
-          );
-        }
-        
-        // Wait before retry
-        await new Promise(resolve => setTimeout(resolve, 2000));
+      if (layoutImage) {
+        referenceImages.push(layoutImage);
+        logger.info('Added layout image as reference', { mimeType: layoutImage.mimeType });
       }
-    }
 
-    // Use best result if we never hit the threshold
-    if (bestImage) {
-      imageData = bestImage.data;
-      mimeType = bestImage.mimeType;
-      architecturalAccuracy = bestImage.accuracy;
-      
-      if (bestImage.accuracy < ACCURACY_CONFIG.MIN_ACCURACY) {
-        logger.warn('Using best available result despite low accuracy', {
-          accuracy: bestImage.accuracy,
-          threshold: ACCURACY_CONFIG.MIN_ACCURACY,
-          attempts,
-        });
+      if (floorPlanImage && !floorPlanImage.mimeType.includes('svg')) {
+        referenceImages.push(floorPlanImage);
+        logger.info('Added floor plan as reference');
       }
-    } else {
+
+      const validMoodboards = moodboardImages.filter((m) => !m.mimeType.includes('svg'));
+      referenceImages.push(...validMoodboards.map((m) => ({ data: m.data, mimeType: m.mimeType })));
+
+      logger.info('Calling Gemini with references (single pass)', {
+        referenceCount: referenceImages.length,
+        moodboardCount: validMoodboards.length,
+        promptLength: constrainedPrompt.length,
+      });
+
+      const result = await geminiClient.generateImageWithReferences(
+        constrainedPrompt,
+        referenceImages,
+        { timeoutMs: 180_000, temperature: 0.3 }
+      );
+
+      imageData = result.imageData;
+      mimeType = result.mimeType || 'image/png';
+      architecturalAccuracy = undefined;
+    } catch (genError) {
+      const errorMessage = genError instanceof Error ? genError.message : String(genError);
+      logger.error('Isometric image generation failed', { error: errorMessage });
       throw new IsometricGenerationError(
         IsometricErrorCode.IMAGE_GENERATION_FAILED,
-        'No valid image generated',
-        true
+        `Image generation failed: ${errorMessage}`,
+        true,
+        { originalError: errorMessage }
       );
     }
 
     logger.info('Generation complete', {
       totalDurationMs: Date.now() - imageStartTime,
-      finalAccuracy: architecturalAccuracy,
-      attempts,
     });
 
     // ===========================================

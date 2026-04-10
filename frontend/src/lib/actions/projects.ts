@@ -5,17 +5,8 @@
  * Fetches real project data from backend API
  */
 
-import { auth } from '@clerk/nextjs/server';
+import { getServerAuthHeaders } from '@/lib/server-auth';
 import { getApiBase } from '@/lib/api-base';
-
-async function authHeaders(): Promise<{ Authorization: string; 'x-user-id'?: string } | null> {
-  const { getToken, userId } = await auth();
-  const token = await getToken();
-  if (!token) return null;
-  const headers: { Authorization: string; 'x-user-id'?: string } = { Authorization: `Bearer ${token}` };
-  if (userId) headers['x-user-id'] = userId;
-  return headers;
-}
 
 export interface Project {
   id: string;
@@ -37,17 +28,11 @@ export interface ProjectsResponse {
 
 export async function getProjects(): Promise<ProjectsResponse> {
   try {
-    const { getToken, userId } = await auth();
-    const token = await getToken();
+    const headers = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!headers) {
       return { success: false, error: 'Not authenticated' };
     }
-
-    const headers: Record<string, string> = {
-      'Authorization': `Bearer ${token}`,
-    };
-    if (userId) headers['x-user-id'] = userId;
 
     const response = await fetch(`${getApiBase()}/api/projects`, {
       headers,
@@ -122,13 +107,16 @@ export async function getProjects(): Promise<ProjectsResponse> {
     return { success: true, data: projectsWithUrls };
   } catch (error) {
     console.error('Error fetching projects:', error);
-    return { success: false, error: (error as Error).message };
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to load projects',
+    };
   }
 }
 
 export async function deleteProject(projectId: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const headers = await authHeaders();
+    const headers = await getServerAuthHeaders();
     if (!headers) return { success: false, error: 'Not authenticated' };
 
     const response = await fetch(`${getApiBase()}/api/projects/${projectId}`, {
@@ -153,7 +141,7 @@ export async function deleteProject(projectId: string): Promise<{ success: boole
 
 export async function renameProject(projectId: string, newName: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const headers = await authHeaders();
+    const headers = await getServerAuthHeaders();
     if (!headers) return { success: false, error: 'Not authenticated' };
 
     const response = await fetch(`${getApiBase()}/api/projects/${projectId}`, {
@@ -179,7 +167,7 @@ export async function renameProject(projectId: string, newName: string): Promise
 
 export async function archiveProject(projectId: string, archived: boolean): Promise<{ success: boolean; error?: string }> {
   try {
-    const headers = await authHeaders();
+    const headers = await getServerAuthHeaders();
     if (!headers) return { success: false, error: 'Not authenticated' };
 
     const response = await fetch(`${getApiBase()}/api/projects/${projectId}`, {
@@ -205,7 +193,7 @@ export async function archiveProject(projectId: string, archived: boolean): Prom
 
 export async function favoriteProject(projectId: string, favorite: boolean): Promise<{ success: boolean; error?: string }> {
   try {
-    const headers = await authHeaders();
+    const headers = await getServerAuthHeaders();
     if (!headers) return { success: false, error: 'Not authenticated' };
 
     const response = await fetch(`${getApiBase()}/api/projects/${projectId}`, {

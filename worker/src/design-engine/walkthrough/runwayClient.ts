@@ -2,11 +2,9 @@
  * Runway Video Generation Client
  *
  * Supports:
- * 1) Image-to-video (gen4_turbo): POST /v1/image_to_video
- * 2) Video-to-video (gen4_aleph): POST /v1/video_to_video — prompt is primary; image optional as reference.
+ * 1) Image-to-video (gen4.5): POST /v1/image_to_video
  *
  * Docs: https://docs.dev.runwayml.com/
- * video_to_video (gen4_aleph): videoUri required, promptText required (1–1000 chars), references[] optional (image for style).
  */
 
 const RUNWAY_VIDEO_URI_MAX_LEN = 2048; // HTTPS video URL max length
@@ -110,120 +108,6 @@ export class RunwayClient {
     };
   }
 
-  /**
-   * Generate video using gen4_aleph (video_to_video). Prompt is primary; image is reference only.
-   * Use when you have a source video URI and want the prompt to drive the output.
-   */
-  async generateVideoFromVideo(
-    videoUri: string,
-    promptText: string,
-    referenceImageUri?: string,
-    seed?: number
-  ): Promise<{ videoData: Buffer; mimeType: string }> {
-    if (videoUri.length > RUNWAY_VIDEO_URI_MAX_LEN) {
-      throw new Error(
-        `Runway video URI must be ≤${RUNWAY_VIDEO_URI_MAX_LEN} characters (got ${videoUri.length})`
-      );
-    }
-    logger.info('Starting Runway video-to-video (gen4_aleph)', {
-      videoUriLength: videoUri.length,
-      promptLength: promptText.length,
-      hasReferenceImage: !!referenceImageUri,
-    });
-    const taskId = await this.createTaskVideoToVideo(
-      videoUri,
-      promptText,
-      referenceImageUri,
-      seed
-    );
-    const outputUrl = await this.pollTask(taskId);
-    const downloadController = new AbortController();
-    const downloadTimeoutId = setTimeout(
-      () => downloadController.abort(),
-      VIDEO_DOWNLOAD_TIMEOUT_MS
-    );
-    let videoResponse: Response;
-    try {
-      videoResponse = await fetch(outputUrl, { signal: downloadController.signal });
-    } catch (err: unknown) {
-      clearTimeout(downloadTimeoutId);
-      const cause = err instanceof Error ? err.cause || err.message : String(err);
-      throw new Error(
-        err instanceof Error && err.name === 'AbortError'
-          ? `Runway video download timed out after ${VIDEO_DOWNLOAD_TIMEOUT_MS / 1000}s`
-          : `Runway video download failed: ${cause}`
-      );
-    }
-    clearTimeout(downloadTimeoutId);
-    if (!videoResponse.ok) {
-      throw new Error(`Runway: failed to download video: ${videoResponse.status}`);
-    }
-    const arrayBuffer = await videoResponse.arrayBuffer();
-    const videoData = Buffer.from(arrayBuffer);
-    logger.info('Runway video-to-video downloaded', { taskId, size: videoData.length });
-    return { videoData, mimeType: 'video/mp4' };
-  }
-
-  private async createTaskVideoToVideo(
-    videoUri: string,
-    promptText: string,
-    referenceImageUri?: string,
-    seed?: number
-  ): Promise<string> {
-    const truncated =
-      promptText.length > RUNWAY_PROMPT_MAX_LEN
-        ? promptText.slice(0, RUNWAY_PROMPT_MAX_LEN)
-        : promptText;
-    const body: Record<string, unknown> = {
-      model: 'gen4_aleph',
-      videoUri,
-      promptText: truncated,
-    };
-    if (referenceImageUri && referenceImageUri.length <= RUNWAY_IMAGE_URI_MAX_LEN) {
-      (body as Record<string, unknown>).references = [
-        { type: 'image', uri: referenceImageUri },
-      ];
-    }
-    if (seed !== undefined) {
-      body.seed = seed;
-    }
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), CREATE_TASK_TIMEOUT_MS);
-    let res: Response;
-    try {
-      res = await fetch(`${RUNWAY_BASE}/video_to_video`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
-          'X-Runway-Version': RUNWAY_VERSION,
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-    } catch (err: unknown) {
-      clearTimeout(timeoutId);
-      const cause = err instanceof Error ? err.cause || err.message : String(err);
-      throw new Error(`Runway video_to_video request failed: ${cause}`);
-    }
-    clearTimeout(timeoutId);
-    const text = await res.text();
-    if (!res.ok) {
-      logger.error({ status: res.status, body: text }, 'Runway video_to_video failed');
-      throw new Error(`Runway API error ${res.status}: ${text}`);
-    }
-    let data: RunwayCreateResponse;
-    try {
-      data = JSON.parse(text) as RunwayCreateResponse;
-    } catch {
-      throw new Error(`Runway API invalid response: ${text}`);
-    }
-    if (!data.id) {
-      throw new Error(`Runway API did not return task id: ${text}`);
-    }
-    logger.info('Runway video_to_video task created', { taskId: data.id, model: 'gen4_aleph' });
-    return data.id;
-  }
 
   private async createTask(
     imageUrl: string,
@@ -256,7 +140,7 @@ export class RunwayClient {
           position: 'first',
         },
       ],
-      model: 'gen4_turbo',
+      model: 'gen4.5',
       ratio,
       duration,
     };
@@ -354,7 +238,12 @@ export class RunwayClient {
         });
       } catch (err: unknown) {
         clearTimeout(pollTimeoutId);
-        logger.warn({ taskId, err: (err as Error)?.message }, 'Runway poll request failed, will retry');
+        logger.warn({ 
+          taskId, 
+          err: (err as Error)?.message,
+          code: (err as any)?.code,
+          cause: (err as Error)?.cause 
+        }, 'Runway poll request failed, will retry');
         continue;
       }
       clearTimeout(pollTimeoutId);

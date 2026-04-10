@@ -12,11 +12,11 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useUser, useClerk } from '@clerk/nextjs';
+import { AuthUser, getAuthUser, logout } from '@/lib/auth-client';
 import {
   AppBar,
   Toolbar,
@@ -54,8 +54,12 @@ interface AppHeaderProps {
 
 export function AppHeader({ onMenuClick, height, showMenuButton = false }: AppHeaderProps) {
   const router = useRouter();
-  const { user } = useUser();
-  const { signOut } = useClerk();
+  const [user, setUser] = useState<AuthUser | null>(null);
+
+  useEffect(() => {
+    getAuthUser().then(setUser);
+  }, []);
+
   const currentProject = useAppSelector(selectCurrentProject);
   const activeJobs = useAppSelector(selectActiveJobs);
 
@@ -79,8 +83,7 @@ export function AppHeader({ onMenuClick, height, showMenuButton = false }: AppHe
   };
 
   const handleSignOut = async () => {
-    await signOut();
-    router.push('/');
+    await logout();
   };
 
   return (
@@ -208,10 +211,10 @@ export function AppHeader({ onMenuClick, height, showMenuButton = false }: AppHe
             aria-controls="user-menu"
             aria-haspopup="true"
           >
-            {user?.imageUrl ? (
+            {user?.avatarUrl ? (
               <Avatar
-                src={user.imageUrl}
-                alt={user.fullName || 'User'}
+                src={user.avatarUrl}
+                alt={user.name || 'User'}
                 sx={{ width: 32, height: 32 }}
               />
             ) : (
@@ -231,10 +234,10 @@ export function AppHeader({ onMenuClick, height, showMenuButton = false }: AppHe
             {/* User info */}
             <Box sx={{ px: 2, py: 1.5, minWidth: 200 }}>
               <Typography variant="body2" fontWeight={600}>
-                {user?.fullName || 'User'}
+                {user?.name || 'User'}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                {user?.primaryEmailAddress?.emailAddress}
+                {user?.email}
               </Typography>
             </Box>
 
@@ -269,7 +272,7 @@ export function AppHeader({ onMenuClick, height, showMenuButton = false }: AppHe
             </MenuItem>
 
             {/* Admin Dashboard - Only for @tatvaops.com users */}
-            {user?.primaryEmailAddress?.emailAddress?.endsWith('@tatvaops.com') && (
+            {user?.email?.endsWith('@tatvaops.com') && (
               <>
                 <Divider />
                 <MenuItem 

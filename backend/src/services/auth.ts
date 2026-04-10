@@ -1,4 +1,3 @@
-import { verifyToken } from '@clerk/backend';
 import { Request, Response, NextFunction } from 'express';
 import { config } from '../config';
 import { errors } from '../lib/error-handler';
@@ -30,32 +29,41 @@ export interface AuthProvider {
 }
 
 /**
- * Clerk Auth Provider Implementation
+ * Custom Auth Provider Implementation
  */
-export class ClerkAuthProvider implements AuthProvider {
+export class CustomAuthProvider implements AuthProvider {
   async verifyToken(token: string): Promise<{ userId: string } | null> {
     try {
-      const payload = await verifyToken(token, {
-        secretKey: config.clerkSecretKey,
-      });
-      return { userId: payload.sub };
-    } catch {
+      // Basic JWT decoding for the custom tatvaops_token
+      const parts = token.split('.');
+      if (parts.length !== 3) return null;
+      
+      const base64Url = parts[1];
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = Buffer.from(base64, 'base64').toString('utf8');
+      const payload = JSON.parse(jsonPayload);
+      
+      // The payload has { "userId": "..." }
+      if (payload && payload.userId) {
+        return { userId: payload.userId };
+      }
+      // Also fallback if the token sub is used
+      if (payload && payload.sub) {
+        return { userId: payload.sub };
+      }
+      return null;
+    } catch (e) {
       return null;
     }
   }
 
-  async getUserById(clerkId: string): Promise<AuthUser | null> {
-    // TODO: Fetch from database
-    // const user = await prisma.user.findUnique({
-    //   where: { clerkId },
-    // });
-    // return user;
+  async getUserById(userId: string): Promise<AuthUser | null> {
     return null;
   }
 }
 
 // Default auth provider
-let authProvider: AuthProvider = new ClerkAuthProvider();
+let authProvider: AuthProvider = new CustomAuthProvider();
 
 /**
  * Switch auth provider (for future Auth.js migration)

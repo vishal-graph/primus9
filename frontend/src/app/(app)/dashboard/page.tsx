@@ -11,7 +11,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useAuth } from '@clerk/nextjs';
+import { getAccessToken } from '@/lib/auth-client';
 import {
   Box,
   Typography,
@@ -33,6 +33,7 @@ import {
   DialogContent,
   DialogActions,
   Alert,
+  Checkbox,
 } from '@mui/material';
 import {
   Add,
@@ -49,6 +50,8 @@ import {
   Delete,
   Archive,
   Refresh,
+  SelectAll,
+  ClearAll,
 } from '@mui/icons-material';
 import { UploadModal, type PlanOption } from '@/components/upload/UploadModal';
 import { UploadingOverlay } from '@/components/upload/UploadingOverlay';
@@ -79,7 +82,7 @@ const PROJECT_CARD_ID_PREFIX = 'project-';
 export default function DashboardPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { getToken } = useAuth();
+  // const { getToken } = useAuth();
   const contentRef = useRef<HTMLDivElement>(null);
   const scrollToProjectIdRef = useRef<() => void>(() => {});
 
@@ -97,11 +100,33 @@ export default function DashboardPage() {
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(new Set());
+  const [isBulkDelete, setIsBulkDelete] = useState(false);
+
+  const handleSelectToggle = (e: React.MouseEvent | React.ChangeEvent, projectId: string) => {
+    e.stopPropagation();
+    setSelectedProjectIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(projectId)) next.delete(projectId);
+      else next.add(projectId);
+      return next;
+    });
+  };
+
+  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.checked) {
+      setSelectedProjectIds(new Set(filteredProjects.map((p) => p.id)));
+    } else {
+      setSelectedProjectIds(new Set());
+    }
+  };
+
+  const clearSelection = () => setSelectedProjectIds(new Set());
 
   useEffect(() => {
     const fetchUserAndPlans = async () => {
       try {
-        const token = await getToken();
+        const token = getAccessToken();
         if (!token) return;
         const [userRes, plansRes] = await Promise.all([
           fetch('/api/user/me', { headers: { Authorization: `Bearer ${token}` } }),
@@ -116,15 +141,20 @@ export default function DashboardPage() {
       }
     };
     fetchUserAndPlans();
-  }, [getToken]);
+  }, []);
 
   const fetchProjects = async () => {
     setIsLoading(true);
     setError(null);
-    const result = await getProjects();
-    if (result.success && result.data) setProjects(result.data);
-    else setError(result.error || 'Failed to load projects');
-    setIsLoading(false);
+    try {
+      const result = await getProjects();
+      if (result?.success && result.data) setProjects(result.data);
+      else setError(result?.error || 'Failed to load projects');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load projects');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -139,10 +169,10 @@ export default function DashboardPage() {
     setShowUploadingOverlay(false);
   };
 
-  const handleUploadSuccess = (projectId: string, jobId: string) => {
+  const handleUploadSuccess = (slug: string) => {
     setUploadModalOpen(false);
     setShowUploadingOverlay(false);
-    router.push(`/upload/success?projectId=${projectId}&jobId=${jobId}`);
+    router.push(`/project/${slug}/processing`);
   };
 
   const filteredProjects = projects.filter((project) => {
@@ -161,6 +191,13 @@ export default function DashboardPage() {
     }
     return matchesSearch && matchesFilter;
   });
+
+  const selectAllFiltered = () => {
+    setSelectedProjectIds(new Set(filteredProjects.map((p) => p.id)));
+  };
+
+  const allFilteredSelected =
+    filteredProjects.length > 0 && filteredProjects.every((p) => selectedProjectIds.has(p.id));
 
   // Scroll to project when URL hash is #project-<id> or ?scrollTo=<id>
   const scrollToProjectId = () => {
@@ -203,8 +240,9 @@ export default function DashboardPage() {
     return date.toLocaleDateString();
   };
 
-  const handleProjectClick = (projectId: string) => {
-    router.push(`/project/${projectId}`);
+  const handleProjectClick = (project: any) => {
+    const slug = project.slug || project.id;
+    router.push(`/project/${slug}/floor-plan`);
   };
 
   const handleMenuOpen = (event: React.MouseEvent<HTMLElement>, project: Project) => {
@@ -220,16 +258,28 @@ export default function DashboardPage() {
 
   const handleDelete = () => {
     setDeleteDialogOpen(true);
+    setIsBulkDelete(false);
     setMenuAnchor(null);
   };
 
+  const handleBulkDeleteClicked = () => {
+    setDeleteDialogOpen(true);
+    setIsBulkDelete(true);
+  };
+
   const handleDeleteConfirm = async () => {
-    if (selectedProject) {
+    if (isBulkDelete && selectedProjectIds.size > 0) {
+      const idsToDelete = Array.from(selectedProjectIds);
+      await Promise.all(idsToDelete.map((id) => deleteProject(id)));
+      setProjects((prev) => prev.filter((p) => !selectedProjectIds.has(p.id)));
+      clearSelection();
+    } else if (selectedProject) {
       const result = await deleteProject(selectedProject.id);
       if (result.success) setProjects((prev) => prev.filter((p) => p.id !== selectedProject.id));
     }
     setDeleteDialogOpen(false);
     setSelectedProject(null);
+    setIsBulkDelete(false);
   };
 
   const handleArchive = async () => {
@@ -314,6 +364,61 @@ export default function DashboardPage() {
                 <ToggleButton value="grid" aria-label="Grid"><ViewModule sx={{ fontSize: 18 }} /></ToggleButton>
                 <ToggleButton value="list" aria-label="List"><ViewList sx={{ fontSize: 18 }} /></ToggleButton>
               </ToggleButtonGroup>
+
+              {!isLoading && filteredProjects.length > 0 && (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<SelectAll sx={{ fontSize: 18 }} />}
+                    onClick={selectAllFiltered}
+                    disabled={allFilteredSelected}
+                    sx={{
+                      textTransform: 'none',
+                      fontSize: 12,
+                      borderColor: border,
+                      color: textMain,
+                      '&:hover': { borderColor: PRIMARY, bgcolor: alpha(PRIMARY, isDark ? 0.12 : 0.06) },
+                    }}
+                  >
+                    Select all
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<ClearAll sx={{ fontSize: 18 }} />}
+                    onClick={clearSelection}
+                    disabled={selectedProjectIds.size === 0}
+                    sx={{
+                      textTransform: 'none',
+                      fontSize: 12,
+                      borderColor: border,
+                      color: textMain,
+                      '&:hover': { borderColor: PRIMARY, bgcolor: alpha(PRIMARY, isDark ? 0.12 : 0.06) },
+                    }}
+                  >
+                    Deselect all
+                  </Button>
+                </Box>
+              )}
+
+              {selectedProjectIds.size > 0 && (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: { xs: 0, lg: 1 }, borderLeft: { lg: 1 }, borderColor: border, pl: { lg: 2 } }}>
+                  <Typography variant="body2" sx={{ fontWeight: 600, color: textMain }}>
+                    {selectedProjectIds.size} selected
+                  </Typography>
+                  <Button
+                    variant="contained"
+                    color="error"
+                    size="small"
+                    startIcon={<Delete sx={{ fontSize: 18 }} />}
+                    onClick={handleBulkDeleteClicked}
+                    sx={{ textTransform: 'none', px: 2, height: 32 }}
+                  >
+                    Delete
+                  </Button>
+                </Box>
+              )}
             </Box>
           </Box>
         </Box>
@@ -344,9 +449,20 @@ export default function DashboardPage() {
               {filteredProjects.length === 0 ? (
                 <EmptyState icon={<Add sx={{ fontSize: 40, color: 'primary.main' }} />} title="No projects yet" description="Create your first project by uploading a floor plan or starting from scratch." actionLabel="Create project" onAction={() => setUploadModalOpen(true)} />
               ) : (
-                filteredProjects.map((project) => (
-                  <Box key={project.id} id={`${PROJECT_CARD_ID_PREFIX}${project.id}`} onClick={() => handleProjectClick(project.id)} sx={{ display: 'flex', alignItems: 'center', px: 2, py: 2, borderBottom: 1, borderColor: border, cursor: 'pointer', '&:hover': { bgcolor: isDark ? alpha(SURFACE_DARK, 0.6) : alpha(BORDER_LIGHT, 0.5) } }}>
-                    <Box sx={{ width: 80, height: 60, mr: 2, borderRadius: 1, overflow: 'hidden', bgcolor: border }}>{project.floorPlanUrl ? <Box component="img" src={project.floorPlanUrl} alt="" sx={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : null}</Box>
+                <>
+                  <Box sx={{ display: 'flex', alignItems: 'center', px: 2, py: 1.5, borderBottom: 1, borderColor: border, bgcolor: isDark ? alpha(SURFACE_DARK, 0.4) : alpha(BORDER_LIGHT, 0.3) }}>
+                    <Box onClick={(e) => e.stopPropagation()} sx={{ display: 'flex', mr: 2 }}>
+                       <Checkbox size="small" checked={filteredProjects.length > 0 && selectedProjectIds.size === filteredProjects.length} indeterminate={selectedProjectIds.size > 0 && selectedProjectIds.size < filteredProjects.length} onChange={handleSelectAll} />
+                    </Box>
+                    <Typography variant="caption" sx={{ color: textSec, flex: 1, pl: '80px', fontWeight: 600 }}>NAME</Typography>
+                    <Typography variant="caption" sx={{ color: textSec, width: 120, textAlign: 'right', mr: 8, fontWeight: 600 }}>LAST UPDATED</Typography>
+                  </Box>
+                  {filteredProjects.map((project) => (
+                    <Box key={project.id} id={`${PROJECT_CARD_ID_PREFIX}${project.id}`} onClick={() => handleProjectClick(project)} sx={{ display: 'flex', alignItems: 'center', px: 2, py: 2, borderBottom: 1, borderColor: border, cursor: 'pointer', '&:hover': { bgcolor: isDark ? alpha(SURFACE_DARK, 0.6) : alpha(BORDER_LIGHT, 0.5) } }}>
+                      <Box onClick={(e) => e.stopPropagation()} sx={{ display: 'flex', mr: 2 }}>
+                         <Checkbox size="small" checked={selectedProjectIds.has(project.id)} onChange={(e) => handleSelectToggle(e, project.id)} />
+                      </Box>
+                      <Box sx={{ width: 80, height: 60, mr: 2, borderRadius: 1, overflow: 'hidden', bgcolor: border }}>{project.floorPlanUrl ? <Box component="img" src={project.floorPlanUrl} alt="" sx={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : null}</Box>
                     <Box sx={{ flex: 1 }}>
                       <Typography sx={{ fontWeight: 600, color: textMain }}>{project.name}</Typography>
                       <Typography variant="caption" sx={{ color: textSec }}>Updated {formatDate(project.updatedAt)}</Typography>
@@ -354,7 +470,8 @@ export default function DashboardPage() {
                     <IconButton size="small" onClick={(e) => handleToggleFavorite(e, project)}>{project.isFavorite ? <Star sx={{ color: '#eab308' }} /> : <StarBorder />}</IconButton>
                     <IconButton size="small" onClick={(e) => handleMenuOpen(e, project)}><MoreHoriz /></IconButton>
                   </Box>
-                ))
+                ))}
+                </>
               )}
             </Box>
               ) : filteredProjects.length === 0 ? (
@@ -368,7 +485,15 @@ export default function DashboardPage() {
               </Box>
               {filteredProjects.map((project) => (
                 <Box key={project.id} id={`${PROJECT_CARD_ID_PREFIX}${project.id}`} sx={{ minHeight: 0 }}>
-                  <ProjectCard project={project} onFavoriteToggle={(e) => handleToggleFavorite(e, project)} onMenuOpen={(e) => handleMenuOpen(e, project)} onClick={() => handleProjectClick(project.id)} formatDate={formatDate} />
+                  <ProjectCard 
+                    project={project} 
+                    onFavoriteToggle={(e) => handleToggleFavorite(e, project)} 
+                    onMenuOpen={(e) => handleMenuOpen(e, project)} 
+                    onClick={() => handleProjectClick(project)} 
+                    formatDate={formatDate} 
+                    isSelected={selectedProjectIds.has(project.id)}
+                    onSelectToggle={(e) => handleSelectToggle(e, project.id)}
+                  />
                 </Box>
               ))}
             </Box>
@@ -392,8 +517,14 @@ export default function DashboardPage() {
       </Menu>
 
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Delete Project</DialogTitle>
-        <DialogContent><Typography>Are you sure you want to delete <strong>{selectedProject?.name}</strong>? This action cannot be undone.</Typography></DialogContent>
+        <DialogTitle>Delete Project{isBulkDelete ? 's' : ''}</DialogTitle>
+        <DialogContent>
+          <Typography>
+            {isBulkDelete 
+              ? `Are you sure you want to delete ${selectedProjectIds.size} selected projects? This action cannot be undone.` 
+              : <>Are you sure you want to delete <strong>{selectedProject?.name}</strong>? This action cannot be undone.</>}
+          </Typography>
+        </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
           <Button onClick={handleDeleteConfirm} color="error" variant="contained">Delete</Button>

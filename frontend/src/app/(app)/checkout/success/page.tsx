@@ -1,8 +1,8 @@
 'use client';
+import { getAccessToken, getAuthUser, type AuthUser } from '@/lib/auth-client';
 
 import { Suspense, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useAuth } from '@clerk/nextjs';
 import { Box, Container, Typography, Button } from '@mui/material';
 import { CheckCircle, SpaceDashboard, Download, AutoAwesome, Diamond } from '@mui/icons-material';
 
@@ -47,8 +47,7 @@ function SuccessFallback() {
 function CheckoutSuccessContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { getToken } = useAuth();
-
+  
   const planName = searchParams.get('planName') || searchParams.get('plan') || 'Plan';
   const amountPaise = searchParams.get('amount');
   const subscriptionId = searchParams.get('subscriptionId');
@@ -78,7 +77,7 @@ function CheckoutSuccessContent() {
   const handleDownloadInvoice = async () => {
     if (!subscriptionId) return;
     try {
-      const token = await getToken();
+      const token = getAccessToken();
       const res = await fetch(`/api/billing/invoices/${subscriptionId}/download`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });

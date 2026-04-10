@@ -8,57 +8,114 @@ import { buildGeometryConstraintString } from '../elevation/geometryValidator';
 import { buildStyleInstructionString } from '../elevation/styleExtractor';
 import { Room2DViewType } from './types';
 import { RoomElevationGeometry, WallGeometry } from '../elevation/types';
+import { DesignIntent } from '../types';
+import { getRoomContext } from '../common/roomContext';
 
-/** Build prompt for single corner bird's-eye room view (~280–300°). Moodboard = primary, elevation = secondary. */
+function describeReferenceOrder(hasIsometric: boolean): string {
+  const lines: string[] = [
+    '=== REFERENCE IMAGES (ORDER MATCHES INLINE IMAGES BEFORE THIS TEXT) ===',
+    'The model receives reference images in this exact order:',
+    '• IMAGE 1 — ROOM MOODBOARD (same pipeline as moodboard generation): This is the authoritative design board for THIS room.',
+    '  You MUST preserve its visual language: every major furniture piece, rug, lighting fixture, wall treatment, art, and decor that appears in the moodboard should appear in your render in the same style and similar arrangement.',
+    '  Do NOT replace the sofa/bed/cabinets with different designs. Do NOT change the color story or material palette. Treat the moodboard as a product spec the client already approved.',
+  ];
+  if (hasIsometric) {
+    lines.push(
+      '• IMAGE 2 — FULL-FLOOR ISOMETRIC / INTERIOR ELEVATION: Use this to understand where this room sits on the floor, its footprint, neighboring spaces, circulation flow, and overall massing.',
+      '  Infer door/window placement on the envelope, room proportions, and how movement flows into connected areas. It does NOT override moodboard finishes—only spatial layout and adjacency.'
+    );
+  }
+  lines.push(
+    '',
+    '=== MOODBOARD = GENERATION PARITY ===',
+    'Your output should look like ONE photoreal photograph of the SAME interior concept as the moodboard—same elements—not a reinterpretation or a different scheme.',
+    ''
+  );
+  return lines.join('\n');
+}
+
+/** Build prompt for one unified interior photograph (wide but natural FOV). Moodboard primary; isometric for layout. */
 export function buildBirdViewPrompt(params: {
   roomGeometry: RoomElevationGeometry;
   styleInstruction: string;
   connectedRooms: string[];
-  isometricUrl?: string;
+  hasIsometricReference: boolean;
+  enrichedSpatialNotes?: string;
+  designIntent?: DesignIntent;
+  productCatalogPrompt?: string;
 }): string {
-  const { roomGeometry, styleInstruction, connectedRooms, isometricUrl } = params;
+  const {
+    roomGeometry,
+    styleInstruction,
+    connectedRooms,
+    hasIsometricReference,
+    enrichedSpatialNotes,
+    designIntent,
+    productCatalogPrompt,
+  } = params;
   const connectedRoomsText =
     connectedRooms.length > 0 ? `Connected rooms: ${connectedRooms.join(', ')}` : 'No connected rooms detected.';
 
+  const refOrder = describeReferenceOrder(hasIsometricReference);
+
   return [
     'You are an expert interior designer AI specialized in Indian residential interiors.',
-    '=== TASK: SINGLE CORNER BIRD\'S-EYE ROOM VIEW (STRICT: ONE DESIGN, ONE IMAGE) ===',
-    `Generate exactly ONE photorealistic interior view for ${roomGeometry.roomName} (${roomGeometry.roomType.replace('_', ' ')}). One design only—do not create alternative views or different designs. This image will be used to generate a 10-second interior video; consistency is critical.`,
+    refOrder,
+    '=== TASK: ONE ROOM, ONE PHOTO — NO SPLITS (STRICT) ===',
+    `Generate exactly ONE photorealistic interior photograph of ${roomGeometry.roomName} (${roomGeometry.roomType.replace('_', ' ')}). This will be used for video—one coherent space, one moment in time.`,
     '',
-    '=== CAMERA: CCTV-STYLE CORNER (NOT TOP-DOWN) ===',
-    'Camera position: like a CCTV or security camera mounted high in ONE corner of the room (where two walls meet). The camera is in that corner, elevated, looking across the room at an ANGLE—so you see both walls meeting at the corner, the floor, and the ceiling. The angle must be an angled bird\'s-eye (oblique), covering roughly 280–300° from that single corner.',
-    'STRICTLY FORBIDDEN: Do NOT use a top-down view. Do NOT use an orthographic or plan view. Do NOT look straight down at the floor. The result must NOT look like a floor plan or a flat overhead view. It must look like a real camera in one corner of the room, angled so two walls and the floor are clearly visible—never straight down.',
+    '=== FORBIDDEN COMPOSITIONS (CRITICAL) ===',
+    '❌ NO split screen, diptych, triptych, collage, or side-by-side panels.',
+    '❌ NO twin images, duplicate scenes, before/after, or two different angles stitched into one frame.',
+    '❌ NO fisheye, barrel distortion, or ultra-wide warping that makes the room look like two separate bubbles.',
+    '❌ NO architectural "dollhouse" cutaway that removes entire walls (gray void edges)—show the room as a normal enclosed interior.',
+    '✅ Output = exactly ONE rectangular image = ONE continuous real-world camera exposure of ONE room.',
+    '',
+    '=== CAMERA: SHOW THE MAJOR PART OF THE ROOM ===',
+    'Place the camera INSIDE the room, slightly elevated (e.g. ~2–2.4m height), usually from a corner or near the entry, looking ACROSS the main volume.',
+    'The frame must show the MAJOR usable area of the room at once: primary fixtures/furniture zone (e.g. vanity + WC zone in a bath, bed + wardrobe in a bedroom, seating in a living room)—not a tight crop of a single corner only.',
+    'Use a natural real-estate / interior wide angle only (think ~24–35mm full-frame equivalent): enough to see most walls and floor in one shot, but still a single believable photograph—not 180°+ panorama.',
+    'Include floor, ceiling, and at least two full walls in view so the space reads as one complete room.',
+    'STRICTLY FORBIDDEN: top-down / plan / orthographic views; looking straight down at the floor only.',
     '',
     '=== INPUT PRIORITY (MANDATORY) ===',
-    '1) PRIMARY: Use the uploaded moodboard as the primary design reference. Style, colors, materials, furniture style, and design direction MUST follow the moodboard. Do not deviate from the moodboard.',
-    '2) SECONDARY: Use the elevation/isometric only for room layout, proportions, geometry, and spatial relationships. Elevation informs shape and placement—it does NOT override moodboard style.',
+    '1) MOODBOARD IMAGE: Style, colors, materials, furniture, decor—must match. No substitute products.',
+    '2) ISOMETRIC (if provided): Spatial context—room shape on plan, neighbors, flow, openings.',
+    productCatalogPrompt?.trim()
+      ? [
+          '',
+          '3) REAL CATALOG PRODUCTS (TEXT): The following database-backed products were used when generating the moodboard. Keep visible furniture, finishes, and lighting **consistent** with both the moodboard image and this list. The moodboard image remains the source of truth for layout and composition; the catalog list is for product identity and consistency.',
+          productCatalogPrompt.trim(),
+          '',
+        ].join('\n')
+      : '',
     '',
     '=== GEOMETRY (FROM FLOOR PLAN - USE FOR LAYOUT ONLY) ===',
     `Room Dimensions: ${roomGeometry.dimensions.length.toFixed(2)} x ${roomGeometry.dimensions.width.toFixed(2)} ${roomGeometry.dimensions.unit}, ceiling ${roomGeometry.dimensions.ceilingHeight.toFixed(2)} ${roomGeometry.dimensions.unit}`,
     connectedRoomsText,
-    'Respect room shape and openings from the floor plan. Do not invent new walls or openings.',
+    enrichedSpatialNotes
+      ? `=== SPATIAL CONTEXT (FROM FLOOR PLAN ENRICHMENT) ===\n${enrichedSpatialNotes}\n`
+      : '',
+    'Respect room shape and openings from the floor plan, isometric reference, and enrichment notes. Do not invent layouts that contradict them.',
     '',
-    '=== STYLE (FROM MOODBOARD - PRIMARY) ===',
+    '=== STYLE (FROM MOODBOARD — TEXT SUMMARY, IMAGE IS STILL SOURCE OF TRUTH) ===',
     styleInstruction,
-    ...INDIAN_CONTEXT,
-    'Extract and apply from moodboard: color palette, materials, textures, furniture style, Indian design elements, lighting mood, wall treatments, flooring type, decorative elements.',
-    '',
-    '=== DESIGN SOURCE PRIORITY ===',
-    '1) Moodboard (highest—style, materials, colors, furniture)',
-    '2) Elevation (layout, proportions, geometry only)',
-    isometricUrl ? `Isometric reference available for layout: ${isometricUrl}` : '',
+    designIntent ? getRoomContext(designIntent) : INDIAN_CONTEXT.join('\n'),
+    'The moodboard IMAGE overrides any minor text conflict—always prefer what you see in IMAGE 1.',
     '',
     '=== OUTPUT REQUIREMENTS ===',
-    'Exactly one photorealistic image. Corner CCTV-style bird\'s-eye (angled from one corner), minimum 4K. Never top-down or orthographic.',
-    'No people, no text overlays, no watermarks.',
-    'Single image only. One design. Do NOT invent new styles or add elements not present in the moodboard.',
-  ].filter(Boolean).join('\n');
+    'Exactly one photorealistic image, one unified composition, minimum 4K.',
+    'No people, no text overlays, no watermarks, no room labels or dimensions drawn on the image.',
+    'One design, one camera position, one exposure—do NOT invent major furniture or finishes absent from the moodboard.',
+  ].join('\n');
 }
 
 const INDIAN_CONTEXT = [
-  'Use Indian residential interior context and references.',
-  'Prefer Indian materials and finishes: teak/rosewood, cane, jali patterns, brass, terracotta, local ceramics, handwoven textiles.',
-  'Avoid Western-centric or Euro-American decor unless explicitly present in the moodboard.',
+  '=== CRITICAL INDIAN ARCHITECTURAL CONTEXT ===',
+  '1. MATERIALS: Use Indian finishes (vitrified tiles, Kota stone, marble flooring, terrazzo, teak/sheesham wood). STRICTLY NO wall-to-wall carpets or rustic Western farmhouse wood.',
+  '2. TROPICAL DESIGN: Show adaptations for Indian climates (cross-ventilation spacing, ceiling fans, sheer curtains + drapes, window security grills). STRICTLY NO fireplaces or heavy velvet drapes.',
+  '3. DEMOGRAPHICS: Halls/Living must have prominent communal seating/diwans, TV units, and Pooja spaces. Kitchens must have heavy-duty wet areas, deep sinks, and closed lofts. Bathrooms must have wet/dry slopes, health faucets, and anti-skid tiles. Bedrooms must have platform beds and ceiling-height wardrobes.',
+  '4. AESTHETICS: Incorporate Indian crafts, jali partitions, brass accents, and vibrant textiles (block prints). Avoid Euro-American sterile modernism.',
 ];
 
 export function buildRoom2DViewPrompt(params: {
@@ -69,6 +126,7 @@ export function buildRoom2DViewPrompt(params: {
   connectedRooms: string[];
   isometricUrl?: string;
   wallType: 'solid' | 'partial' | 'open';
+  designIntent?: DesignIntent;
 }): string {
   const {
     viewType,
@@ -78,6 +136,7 @@ export function buildRoom2DViewPrompt(params: {
     connectedRooms,
     isometricUrl,
     wallType,
+    designIntent,
   } = params;
 
   const geometryString = buildGeometryConstraintString(wall, roomGeometry.roomName);
@@ -113,7 +172,7 @@ export function buildRoom2DViewPrompt(params: {
     '',
     '=== STYLE (FROM MOODBOARD) ===',
     styleInstruction,
-    ...INDIAN_CONTEXT,
+    designIntent ? getRoomContext(designIntent) : INDIAN_CONTEXT.join('\n'),
     'Extract and apply: color palette, materials, textures, furniture style, Indian design elements, lighting mood, wall treatments, flooring type, decorative elements, ceiling inspiration.',
     '',
     '=== DESIGN SOURCE PRIORITY ===',
@@ -133,8 +192,9 @@ export function buildRoom2DViewPrompt(params: {
 export function buildCeilingViewPrompt(params: {
   roomGeometry: RoomElevationGeometry;
   styleInstruction: string;
+  designIntent?: DesignIntent;
 }): string {
-  const { roomGeometry, styleInstruction } = params;
+  const { roomGeometry, styleInstruction, designIntent } = params;
 
   return [
     'You are an expert interior designer AI specialized in Indian residential interiors.',
@@ -152,7 +212,7 @@ export function buildCeilingViewPrompt(params: {
     '',
     '=== STYLE (FROM MOODBOARD) ===',
     styleInstruction,
-    ...INDIAN_CONTEXT,
+    designIntent ? getRoomContext(designIntent) : INDIAN_CONTEXT.join('\n'),
     'Extract and apply: color palette, materials, textures, furniture style, Indian design elements, lighting mood, wall treatments, flooring type, decorative elements, ceiling inspiration.',
     '',
     '=== OUTPUT REQUIREMENTS ===',

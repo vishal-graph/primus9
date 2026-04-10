@@ -37,13 +37,13 @@ const onboardingSchema = z.object({
 // GET /api/user/profile - Get current user profile
 router.get('/profile', async (req, res, next) => {
   try {
-    const clerkUserId = req.clerkUserId;
-    if (!clerkUserId) {
+    const userId = req.userId;
+    if (!userId) {
       return res.status(401).json({ success: false, error: 'Unauthorized' });
     }
 
     const user = await prisma.user.findUnique({
-      where: { clerkId: clerkUserId },
+      where: { id: userId },
     });
 
     if (!user) {
@@ -98,15 +98,15 @@ router.get('/me', async (req, res, next) => {
 // PATCH /api/user/profile - Update current user profile
 router.patch('/profile', async (req, res, next) => {
   try {
-    const clerkUserId = req.clerkUserId;
-    if (!clerkUserId) {
+    const userId = req.userId;
+    if (!userId) {
       return res.status(401).json({ success: false, error: 'Unauthorized' });
     }
 
     const validatedData = updateProfileSchema.parse(req.body);
 
     const user = await prisma.user.update({
-      where: { clerkId: clerkUserId },
+      where: { id: userId },
       data: validatedData,
     });
 
@@ -126,15 +126,15 @@ router.patch('/profile', async (req, res, next) => {
 // POST /api/user/onboarding - Complete onboarding and collect full profile
 router.post('/onboarding', async (req, res, next) => {
   try {
-    const clerkUserId = req.clerkUserId;
-    if (!clerkUserId) {
+    const userId = req.userId;
+    if (!userId) {
       return res.status(401).json({ success: false, error: 'Unauthorized' });
     }
 
     const validatedData = onboardingSchema.parse(req.body);
 
     const user = await prisma.user.update({
-      where: { clerkId: clerkUserId },
+      where: { id: userId },
       data: {
         phone: validatedData.phone,
         name: validatedData.name,

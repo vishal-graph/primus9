@@ -10,7 +10,7 @@
 
 'use server';
 
-import { auth } from '@clerk/nextjs/server';
+import { getServerAuthHeaders } from '@/lib/server-auth';
 import { getApiBase } from '@/lib/api-base';
 
 // ============================================
@@ -83,10 +83,9 @@ export async function saveIntent(
   roomId?: string
 ): Promise<{ success: boolean; intentId?: string; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
@@ -94,7 +93,7 @@ export async function saveIntent(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
       body: JSON.stringify({
         scope,
@@ -125,17 +124,16 @@ export async function lockIntent(
   intentId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/projects/${projectId}/intents/${intentId}/lock`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
     });
 
@@ -168,10 +166,9 @@ export async function triggerMoodboardGeneration(
   areaEstimate?: number
 ): Promise<{ success: boolean; jobId?: string; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
@@ -179,7 +176,7 @@ export async function triggerMoodboardGeneration(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
       body: JSON.stringify({
         type: 'MOODBOARD',
@@ -221,10 +218,9 @@ export async function triggerGlobalMoodboardGeneration(
   intentPayload: IntentPayload
 ): Promise<{ success: boolean; jobs?: MoodboardJob[]; errors?: string[]; skipped?: number }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, errors: ['Not authenticated'] };
     }
 
@@ -252,7 +248,7 @@ export async function triggerGlobalMoodboardGeneration(
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
+            'Authorization': authHeaders!.Authorization,
           },
           body: JSON.stringify({
             type: 'MOODBOARD',
@@ -308,10 +304,9 @@ export async function regenerateAllMoodboards(
   intentPayload: IntentPayload
 ): Promise<{ success: boolean; jobs?: MoodboardJob[]; errors?: string[] }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, errors: ['Not authenticated'] };
     }
 
@@ -343,7 +338,7 @@ export async function regenerateAllMoodboards(
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
+            'Authorization': authHeaders!.Authorization,
           },
           body: JSON.stringify({
             type: 'MOODBOARD',
@@ -398,16 +393,15 @@ export async function getMoodboardJobStatus(
   jobId: string
 ): Promise<{ success: boolean; job?: MoodboardJob; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/jobs/${jobId}`, {
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
     });
 
@@ -443,16 +437,15 @@ export async function getProjectIntents(
   projectId: string
 ): Promise<{ success: boolean; intents?: SavedIntent[]; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/projects/${projectId}/intents`, {
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
     });
 
@@ -496,16 +489,15 @@ export async function getProjectActiveJobs(
   projectId: string
 ): Promise<{ success: boolean; jobs?: ActiveJob[]; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     const response = await fetch(`${getApiBase()}/api/jobs?projectId=${projectId}&status=QUEUED,PROCESSING`, {
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
     });
 
@@ -540,17 +532,16 @@ export async function getProjectMoodboards(
   projectId: string
 ): Promise<{ success: boolean; moodboards?: RoomMoodboard[]; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
     // Fetch project with rooms and their moodboards
     const response = await fetch(`${getApiBase()}/api/projects/${projectId}`, {
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
     });
 
@@ -600,10 +591,9 @@ export async function regenerateMoodboard(
   roomId: string
 ): Promise<{ success: boolean; jobId?: string; error?: string }> {
   try {
-    const { getToken } = await auth();
-    const token = await getToken();
+    const authHeaders = await getServerAuthHeaders();
 
-    if (!token) {
+    if (!authHeaders) {
       return { success: false, error: 'Not authenticated' };
     }
 
@@ -642,7 +632,7 @@ export async function regenerateMoodboard(
     try {
       const projectResponse = await fetch(`${getApiBase()}/api/projects/${projectId}`, {
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': authHeaders!.Authorization,
         },
       });
 
@@ -661,7 +651,7 @@ export async function regenerateMoodboard(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+        'Authorization': authHeaders!.Authorization,
       },
       body: JSON.stringify({
         type: 'MOODBOARD',

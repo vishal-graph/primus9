@@ -14,6 +14,7 @@
  */
 
 'use client';
+import { getAuthUser } from '@/lib/auth-client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -57,7 +58,6 @@ import { slideFromBottomVariants, staggerContainerVariants, staggerItemVariants 
 import { FeedbackModal } from '@/components/feedback/FeedbackModal';
 import { buildProjectContext } from '@/lib/feedback/build-context';
 import { checkFeedbackExists } from '@/lib/actions/feedback';
-import { useUser } from '@clerk/nextjs';
 import type { ProjectContext } from '@/lib/feedback/feedback-engine';
 import { getApiBase } from '@/lib/api-base';
 import { createMoodboardPdfExport, getExportStatus, ExportAssetStatus } from '@/lib/actions/exports';
@@ -153,8 +153,7 @@ export function MoodboardStage({ projectId, onStageChange }: MoodboardStageProps
   const [jobStartTimes, setJobStartTimes] = useState<Map<string, number>>(new Map()); // jobId -> timestamp
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [feedbackContext, setFeedbackContext] = useState<ProjectContext | null>(null);
-  const { user } = useUser();
-  
+    
   // PDF Export state
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportId, setExportId] = useState<string | null>(null);
@@ -192,6 +191,19 @@ export function MoodboardStage({ projectId, onStageChange }: MoodboardStageProps
       
       if (result.success && result.moodboards) {
         setMoodboards(result.moodboards);
+
+        // Keep Redux generation state in sync with stored moodboards so that
+        // cards don't remain "Generating" after a navigation or reload.
+        result.moodboards.forEach((mb) => {
+          dispatch(
+            completeRoomGeneration({
+              roomId: mb.roomId,
+              moodboardId: mb.id,
+              moodboardUrl: mb.imageUrl,
+              moodboardVersion: mb.version || 1,
+            })
+          );
+        });
       }
 
       // Only check for active jobs on initial load, not on refresh
@@ -481,20 +493,8 @@ export function MoodboardStage({ projectId, onStageChange }: MoodboardStageProps
         ? `${apiBase}/public/download?s3Key=${encodeURIComponent(s3Key)}&filename=${encodeURIComponent(filename)}`
         : `${apiBase}/public/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename)}`;
       
-      // Fetch as blob to enable automatic download (bypasses cross-origin download attribute limitations)
-      const response = await fetch(downloadUrl, { credentials: 'include' });
-      if (!response.ok) throw new Error('Download failed');
-      
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
+      // Use window.location to trigger the browser's native download
+      window.location.assign(downloadUrl);
     } catch (err) {
       console.error('Download failed:', err);
       setError(`Failed to download ${roomName} moodboard`);
@@ -516,6 +516,7 @@ export function MoodboardStage({ projectId, onStageChange }: MoodboardStageProps
     }
 
     // Check if feedback already exists for this project
+    const user = await getAuthUser();
     if (user?.id) {
       const feedbackCheck = await checkFeedbackExists(projectId);
       
@@ -614,19 +615,9 @@ export function MoodboardStage({ projectId, onStageChange }: MoodboardStageProps
       const apiBase = getApiBase();
       const downloadUrl = `${apiBase}/public/download?s3Key=${encodeURIComponent(s3Key)}&filename=${encodeURIComponent(filename)}`;
 
-      const response = await fetch(downloadUrl, { credentials: 'include' });
-      if (!response.ok) throw new Error('Download failed');
-
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
+      // Use window.location to trigger the browser's native download
+      // The backend sets Content-Disposition: attachment
+      window.location.assign(downloadUrl);
     } catch (err) {
       console.error('PDF download failed:', err);
       setError('Failed to download PDF');

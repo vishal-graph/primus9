@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Box, Typography, IconButton, alpha } from '@mui/material';
+import { Box, Typography, IconButton, alpha, Checkbox } from '@mui/material';
 import { GridView, MoreVert, Star, StarBorder } from '@mui/icons-material';
 import type { Project } from '@/lib/actions/projects';
 
@@ -20,6 +20,8 @@ interface ProjectCardProps {
   onMenuOpen: (e: React.MouseEvent<HTMLElement>) => void;
   onClick: () => void;
   formatDate: (dateStr: string) => string;
+  isSelected?: boolean;
+  onSelectToggle?: (e: React.MouseEvent) => void;
 }
 
 export function ProjectCard({
@@ -28,6 +30,8 @@ export function ProjectCard({
   onMenuOpen,
   onClick,
   formatDate,
+  isSelected = false,
+  onSelectToggle,
 }: ProjectCardProps) {
   const [hovered, setHovered] = useState(false);
 
@@ -50,7 +54,7 @@ export function ProjectCard({
         borderColor: hovered ? alpha(CARD_PRIMARY, 0.5) : CARD_BORDER,
         boxShadow: hovered
           ? `0 20px 40px rgba(0,0,0,0.4), 0 0 20px ${alpha(CARD_PRIMARY, 0.08)}`
-          : '0 4px 12px rgba(0,0,0,0.2)',
+          : '0 4px 12px rgba(138, 80, 80, 0.2)',
         transition: 'all 0.2s ease',
       }}
       whileHover={{ y: -6 }}
@@ -80,6 +84,35 @@ export function ProjectCard({
           zIndex: 1,
         }}
       />
+
+      {/* Top-left checkbox */}
+      {(hovered || isSelected) && onSelectToggle && (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: 20,
+            left: 20,
+            zIndex: 3,
+            bgcolor: alpha('#000', 0.4),
+            borderRadius: 1,
+            backdropFilter: 'blur(4px)',
+          }}
+        >
+          <Checkbox
+            size="small"
+            checked={isSelected}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelectToggle(e);
+            }}
+            sx={{
+              color: CARD_TEXT_SEC,
+              '&.Mui-checked': { color: CARD_PRIMARY },
+              p: 0.5,
+            }}
+          />
+        </Box>
+      )}
 
       {/* Top-right actions */}
       <Box

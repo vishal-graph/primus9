@@ -6,7 +6,10 @@ import { errors } from '../lib/error-handler';
 import { ProjectStage, RoomType, RoomStatus, Prisma } from '@prisma/client';
 import { storageService } from '../services/storage';
 import { checkProjectLimit, checkRateLimit } from '../services/plan-guardrails';
+import { generateUniqueSlug, resolveProjectId } from '../lib/slug';
 import * as XLSX from 'xlsx';
+import { reApplyNumericApproximateSizesToStoredRows } from '../lib/component-extraction-room-scale';
+import componentOrdersRouter from './component-orders';
 
 const router = Router();
 
@@ -114,14 +117,18 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-// GET /api/projects/:id - Get single project with all details
+// GET /api/projects/:id - Get single project with all details (accepts slug or UUID)
 router.get('/:id', async (req, res, next) => {
   try {
     const userId = req.userId!;
     const { id } = req.params;
 
+    // Resolve slug or UUID to actual project ID
+    const resolved = await resolveProjectId(id, userId);
+    if (!resolved) throw errors.notFound('Project');
+
     const project = await prisma.project.findFirst({
-      where: { id, userId, deletedAt: null },
+      where: { id: resolved.id, userId, deletedAt: null },
       include: {
         rooms: {
           include: {
@@ -221,9 +228,11 @@ router.post('/', async (req, res, next) => {
       }
 
       // Create project with internal plan override
+      const slug = await generateUniqueSlug(input.name);
       const project = await prisma.project.create({
         data: {
           name: input.name,
+          slug,
           floorPlanUrl: input.floorPlanUrl,
           userId,
           currentStage: 'FLOOR_PLAN',
@@ -252,9 +261,11 @@ router.post('/', async (req, res, next) => {
     await checkProjectLimit(userId);
     await checkRateLimit(userId, 'PROJECT_CREATE');
 
+    const slug = await generateUniqueSlug(input.name);
     const project = await prisma.project.create({
       data: {
         ...input,
+        slug,
         userId,
         currentStage: 'FLOOR_PLAN',
         // Regular users don't set project-level plan (uses user-level subscription)
@@ -277,25 +288,26 @@ router.post('/', async (req, res, next) => {
   }
 });
 
-// PATCH /api/projects/:id - Update project
+// PATCH /api/projects/:id - Update project (accepts slug or UUID)
 router.patch('/:id', async (req, res, next) => {
   try {
     const userId = req.userId!;
     const { id } = req.params;
     const input = updateProjectSchema.parse(req.body);
 
-    // Check ownership
-    const existing = await prisma.project.findFirst({
-      where: { id, userId, deletedAt: null },
-    });
+    // Resolve slug or UUID
+    const resolved = await resolveProjectId(id, userId);
+    if (!resolved) throw errors.notFound('Project');
 
-    if (!existing) {
-      throw errors.notFound('Project');
+    // If name is being changed, regenerate the slug
+    const updateData: any = { ...input };
+    if (input.name) {
+      updateData.slug = await generateUniqueSlug(input.name, resolved.id);
     }
 
     const project = await prisma.project.update({
-      where: { id },
-      data: input,
+      where: { id: resolved.id },
+      data: updateData,
       include: {
         rooms: true,
       },
@@ -312,32 +324,27 @@ router.patch('/:id', async (req, res, next) => {
   }
 });
 
-// DELETE /api/projects/:id - Soft delete project
+// DELETE /api/projects/:id - Soft delete project (accepts slug or UUID)
 router.delete('/:id', async (req, res, next) => {
   try {
     const userId = req.userId!;
     const { id } = req.params;
 
-    // Check ownership
-    const existing = await prisma.project.findFirst({
-      where: { id, userId, deletedAt: null },
-    });
-
-    if (!existing) {
-      throw errors.notFound('Project');
-    }
+    // Resolve slug or UUID
+    const resolved = await resolveProjectId(id, userId);
+    if (!resolved) throw errors.notFound('Project');
 
     // Soft delete
     await prisma.project.update({
-      where: { id },
+      where: { id: resolved.id },
       data: { deletedAt: new Date() },
     });
 
-    logger.info({ projectId: id, userId }, 'Project deleted');
+    logger.info({ projectId: resolved.id, userId }, 'Project deleted');
 
     res.json({
       success: true,
-      data: { id, deleted: true },
+      data: { id: resolved.id, deleted: true },
     });
   } catch (error) {
     next(error);
@@ -950,7 +957,7 @@ router.get('/:id/components', async (req, res, next) => {
         },
       },
       include: {
-        room: { select: { id: true, name: true } },
+        room: { select: { id: true, name: true, type: true, geometry: true, metadata: true } },
       },
       orderBy: [
         { roomId: 'asc' },
@@ -968,10 +975,15 @@ router.get('/:id/components', async (req, res, next) => {
 
     const roomTables = Array.from(latestByRoom.values()).map((extraction) => {
       const data = extraction.data as any;
+      const rawRows = Array.isArray(data?.rows) ? data.rows : [];
+      const rows = reApplyNumericApproximateSizesToStoredRows(rawRows, extraction.room);
+      const roomType =
+        (typeof data?.roomType === 'string' && data.roomType) || extraction.room.type || '';
       return {
         roomId: extraction.roomId,
         roomName: extraction.room.name,
-        rows: Array.isArray(data?.rows) ? data.rows : [],
+        roomType,
+        rows,
         s3Key: extraction.s3Key,
         version: extraction.version,
         createdAt: extraction.createdAt,
@@ -981,6 +993,7 @@ router.get('/:id/components', async (req, res, next) => {
     const combinedRows = roomTables.flatMap((roomTable) =>
       (roomTable.rows || []).map((row: any) => ({
         roomName: row.roomName || roomTable.roomName,
+        roomType: roomTable.roomType || '',
         componentCategory: row.componentCategory || '',
         componentName: row.componentName || '',
         description: row.description || '',
@@ -991,6 +1004,13 @@ router.get('/:id/components', async (req, res, next) => {
         wallLocation: row.wallLocation || '',
         suggestedBuyLinks: formatBuyLinks(row.suggestedBuyLinks || []),
         confidence: typeof row.confidence === 'number' ? String(row.confidence) : '',
+        pricingType: row.pricingType != null ? String(row.pricingType) : '',
+        materialCost:
+          row.materialCost != null && row.materialCost !== '' ? String(row.materialCost) : '',
+        labourCost: row.labourCost != null && row.labourCost !== '' ? String(row.labourCost) : '',
+        totalCost: row.totalCost != null && row.totalCost !== '' ? String(row.totalCost) : '',
+        calculation: row.calculation != null ? String(row.calculation) : '',
+        notes: row.notes != null ? String(row.notes) : '',
       }))
     );
 
@@ -1010,6 +1030,7 @@ router.get('/:id/components', async (req, res, next) => {
       for (const roomTable of roomTables) {
         const sheetRows = (roomTable.rows || []).map((row: any) => ({
           roomName: row.roomName || roomTable.roomName,
+          roomType: roomTable.roomType || '',
           componentCategory: row.componentCategory || '',
           componentName: row.componentName || '',
           description: row.description || '',
@@ -1020,6 +1041,13 @@ router.get('/:id/components', async (req, res, next) => {
           wallLocation: row.wallLocation || '',
           suggestedBuyLinks: formatBuyLinks(row.suggestedBuyLinks || []),
           confidence: typeof row.confidence === 'number' ? String(row.confidence) : '',
+          pricingType: row.pricingType != null ? String(row.pricingType) : '',
+          materialCost:
+            row.materialCost != null && row.materialCost !== '' ? String(row.materialCost) : '',
+          labourCost: row.labourCost != null && row.labourCost !== '' ? String(row.labourCost) : '',
+          totalCost: row.totalCost != null && row.totalCost !== '' ? String(row.totalCost) : '',
+          calculation: row.calculation != null ? String(row.calculation) : '',
+          notes: row.notes != null ? String(row.notes) : '',
         }));
         const sheet = XLSX.utils.json_to_sheet(sheetRows);
         const sheetName = roomTable.roomName.substring(0, 31) || 'Room';
@@ -1164,6 +1192,9 @@ router.get('/:id/isometric/latest', async (req, res, next) => {
     next(error);
   }
 });
+
+// Component orders (checkout / request from Components stage)
+router.use('/:id/component-orders', componentOrdersRouter);
 
 // Helper to get next version number
 async function getNextVersion(projectId: string, stage: ProjectStage): Promise<number> {
