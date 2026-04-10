@@ -54,7 +54,7 @@ export function ProjectCard({
         borderColor: hovered ? alpha(CARD_PRIMARY, 0.5) : CARD_BORDER,
         boxShadow: hovered
           ? `0 20px 40px rgba(0,0,0,0.4), 0 0 20px ${alpha(CARD_PRIMARY, 0.08)}`
-          : '0 4px 12px rgba(14, 13, 13, 0.2)',
+          : '0 4px 12px rgba(138, 80, 80, 0.2)',
         transition: 'all 0.2s ease',
       }}
       whileHover={{ y: -6 }}

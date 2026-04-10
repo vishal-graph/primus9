@@ -42,6 +42,7 @@ export function buildBirdViewPrompt(params: {
   hasIsometricReference: boolean;
   enrichedSpatialNotes?: string;
   designIntent?: DesignIntent;
+  productCatalogPrompt?: string;
 }): string {
   const {
     roomGeometry,
@@ -50,6 +51,7 @@ export function buildBirdViewPrompt(params: {
     hasIsometricReference,
     enrichedSpatialNotes,
     designIntent,
+    productCatalogPrompt,
   } = params;
   const connectedRoomsText =
     connectedRooms.length > 0 ? `Connected rooms: ${connectedRooms.join(', ')}` : 'No connected rooms detected.';
@@ -79,6 +81,14 @@ export function buildBirdViewPrompt(params: {
     '=== INPUT PRIORITY (MANDATORY) ===',
     '1) MOODBOARD IMAGE: Style, colors, materials, furniture, decor—must match. No substitute products.',
     '2) ISOMETRIC (if provided): Spatial context—room shape on plan, neighbors, flow, openings.',
+    productCatalogPrompt?.trim()
+      ? [
+          '',
+          '3) REAL CATALOG PRODUCTS (TEXT): The following database-backed products were used when generating the moodboard. Keep visible furniture, finishes, and lighting **consistent** with both the moodboard image and this list. The moodboard image remains the source of truth for layout and composition; the catalog list is for product identity and consistency.',
+          productCatalogPrompt.trim(),
+          '',
+        ].join('\n')
+      : '',
     '',
     '=== GEOMETRY (FROM FLOOR PLAN - USE FOR LAYOUT ONLY) ===',
     `Room Dimensions: ${roomGeometry.dimensions.length.toFixed(2)} x ${roomGeometry.dimensions.width.toFixed(2)} ${roomGeometry.dimensions.unit}, ceiling ${roomGeometry.dimensions.ceilingHeight.toFixed(2)} ${roomGeometry.dimensions.unit}`,

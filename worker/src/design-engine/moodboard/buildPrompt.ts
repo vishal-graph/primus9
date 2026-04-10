@@ -78,9 +78,16 @@ function getDesignPriorityLine(budget?: string): string {
  * PRESERVED FROM: moodboard-main/app/api/moodboard/route.ts lines 55-107
  * 
  * @param intent - Design parameters (optionally with overrides applied)
+ * @param options.catalogSection - Optional Supabase catalog block (injected after intent, before layout).
  * @returns The complete prompt string
  */
-export function buildMoodboardPrompt(intent: DesignIntent): string {
+export function buildMoodboardPrompt(
+  intent: DesignIntent,
+  options?: { catalogSection?: string }
+): string {
+  const catalogTrimmed = options?.catalogSection?.trim();
+  const catalogPrefix = catalogTrimmed ? ['', catalogTrimmed, ''] : [];
+
   // PRESERVED: Exact prompt structure from moodboard-main
   // Lines 56-105 from moodboard-main/app/api/moodboard/route.ts
   const promptLines = [
@@ -108,6 +115,7 @@ export function buildMoodboardPrompt(intent: DesignIntent): string {
     getDesignPriorityLine(intent.budget),
     'APPLY EVERYTHING: The Indian context, budget priority, and usage/maintenance rules above are mandatory and set the overall priority—but do NOT neglect or overlook any design component. You MUST fully apply ALL of the following from the user intent: furniture, lighting, materials, color palette, textures, decor, and theme/mood. Every component listed in this prompt must be reflected in the moodboard; the top rules are the framework, and all other parameters are required.',
     '',
+    ...catalogPrefix,
     // Layout instructions
     'Arrange fabric swatches, material tiles, inspiration photos, lighting samples, sketches, and palette strips in a cohesive, magazine-style moodboard layout. Use soft shadows and overlapping composition to match high-end interior design collage boards.',
     '',

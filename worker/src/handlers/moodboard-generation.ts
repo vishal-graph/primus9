@@ -19,6 +19,7 @@
  */
 
 import { Message } from '@aws-sdk/client-sqs';
+import { Prisma } from '@prisma/client';
 import {
   generateMoodboard,
   MoodboardJobInput,
@@ -36,6 +37,11 @@ import {
 } from '../design-engine/moodboard/intentMapper';
 import { logger } from '../lib/logger';
 import { getPrisma } from '../lib/prisma';
+import { config } from '../config';
+import { getCatalogPool, resolveProductsForIntent } from '../services/product-catalog';
+import { applyRegenerationOverrides } from '../design-engine/moodboard/buildPrompt';
+import type { MoodboardProductCatalogPayload } from '../design-engine/types';
+import { buildIntentSearchBlob } from '../services/product-catalog/catalogTables';
 
 // ===========================================
 // Database Client (singleton to avoid exhausting DB connection pool)
@@ -322,6 +328,49 @@ export async function handleMoodboardGeneration(
       throw new Error('No designIntent or intentPayload provided in payload');
     }
 
+    const effectiveForCatalog = applyRegenerationOverrides(
+      designIntent,
+      payload.regenerationOverrides
+    );
+    const catalogPool = getCatalogPool(config.productCatalogDatabaseUrl);
+    const catalogResolution = await resolveProductsForIntent(
+      catalogPool,
+      effectiveForCatalog,
+      { strictSofaTiles: config.strictCatalogSofaTiles }
+    );
+
+    if (config.strictCatalogSofaTiles) {
+      const blob = buildIntentSearchBlob(effectiveForCatalog).toLowerCase();
+      const needsSofa = /\b(sofa|sectional|couch|lounge)\b/.test(blob);
+      const needsTile = /\b(tile|tiles|vitrified|flooring)\b/.test(blob);
+      const matches = catalogResolution?.matches || [];
+      const hasSofa = matches.some((m) => m.table === 'sofa_products');
+      const hasTile = matches.some(
+        (m) => m.table === 'mytyles_vitrified_tiles' || m.table === 'flooring_options'
+      );
+      if ((needsSofa && !hasSofa) || (needsTile && !hasTile)) {
+        throw new Error(
+          `STRICT_CATALOG_SOFA_TILES failed: requires sofa=${String(needsSofa)} tile=${String(
+            needsTile
+          )}, resolved sofa=${String(hasSofa)} tile=${String(hasTile)}`
+        );
+      }
+    }
+    const productCatalog: MoodboardProductCatalogPayload | undefined =
+      catalogResolution
+        ? {
+            promptSection: catalogResolution.promptSection,
+            matches: catalogResolution.matches.map((m) => ({
+              table: m.table,
+              id: m.id,
+              label: m.label,
+              summary: m.summary,
+              score: m.score,
+            })),
+            resolvedAt: catalogResolution.resolvedAt,
+          }
+        : undefined;
+
     // Step 3: Build input for Design Engine
     // ============================================================
     // ❗ THIS INPUT GOES DIRECTLY TO generateMoodboard() ❗
@@ -336,6 +385,7 @@ export async function handleMoodboardGeneration(
       referenceImages: payload.referenceImages,
       regenerationOverrides: payload.regenerationOverrides,
       version: payload.version || 1,
+      ...(productCatalog && { productCatalog }),
     };
 
     // Step 4: Generate moodboard using Design Engine
@@ -361,6 +411,7 @@ export async function handleMoodboardGeneration(
       result,
       version: payload.version || 1,
       designIntent,
+      productCatalog,
     });
 
     // Step 7: Update job status to COMPLETED
@@ -552,8 +603,9 @@ async function storeMoodboardInRoom(params: {
   result: MoodboardJobResult;
   version: number;
   designIntent?: DesignIntent;
+  productCatalog?: MoodboardProductCatalogPayload;
 }): Promise<void> {
-  const { jobId, roomId, result, version, designIntent } = params;
+  const { jobId, roomId, result, version, designIntent, productCatalog } = params;
 
   const colorPalette = designIntent?.colorPalette?.split(',').map(c => c.trim()) || [];
   const style = designIntent?.aestheticStyle || 'Generated';
@@ -563,7 +615,14 @@ async function storeMoodboardInRoom(params: {
     durationMs: result.durationMs,
     roomType: designIntent?.roomType,
     themeMood: designIntent?.themeMood,
-  };
+    ...(productCatalog && {
+      productCatalog: {
+        promptSection: productCatalog.promptSection,
+        matches: productCatalog.matches as unknown as Prisma.InputJsonValue,
+        resolvedAt: productCatalog.resolvedAt,
+      },
+    }),
+  } as Prisma.InputJsonValue;
 
   try {
     // Use upsert to handle regeneration (same room + version)

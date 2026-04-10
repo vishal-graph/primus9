@@ -107,6 +107,7 @@ export async function generateRoom2DViews(
     hasIsometricReference,
     enrichedSpatialNotes: input.enrichedSpatialNotes,
     designIntent: input.designIntent,
+    productCatalogPrompt: input.productCatalogPrompt,
   });
 
   const promptHash = hashPrompt(prompt);

@@ -27,6 +27,12 @@ const configSchema = z.object({
   // Database (Supabase PostgreSQL)
   databaseUrl: z.string().url(),
 
+  /**
+   * Optional Postgres URL for product catalog (sofas, tiles, lighting, etc.).
+   * Used by BullMQ worker when running moodboard + TWO_D_VIEWS jobs (worker package handlers).
+   */
+  productCatalogDatabaseUrl: z.string().url().optional(),
+
   // Redis (Upstash or local)
   redisUrl: z.string().default('redis://localhost:6379'),
   redisEnabled: z.coerce.boolean().default(true),
@@ -107,8 +113,9 @@ const configSchema = z.object({
   featureComponentInjection: z.coerce.boolean().default(false),
   featureWhatsappNotifications: z.coerce.boolean().default(false),
 
-  // Worker Settings (for BullMQ worker)
-  workerConcurrency: z.coerce.number().default(3),
+  // BullMQ worker: default 1 avoids Supabase Session pooler "max clients reached" when
+  // many MOODBOARD/FLOORPLAN jobs start at once (each uses Prisma + optional catalog pg).
+  workerConcurrency: z.coerce.number().default(1),
 });
 
 type Config = z.infer<typeof configSchema>;
@@ -168,6 +175,8 @@ function loadConfig(): Config {
 
       // Database
       databaseUrl: process.env.DATABASE_URL,
+      productCatalogDatabaseUrl:
+        process.env.PRODUCT_CATALOG_DATABASE_URL?.trim() || undefined,
 
       // Redis
       redisUrl: process.env.REDIS_URL,
@@ -255,6 +264,10 @@ function loadConfig(): Config {
     const redisUrl = normalizeRedisUrl(parsed.redisUrl);
     // Vision worker handlers read process.env.REDIS_URL; keep in sync with BullMQ (TLS for Upstash).
     process.env.REDIS_URL = redisUrl;
+    // Worker dist handlers (moodboard, TWO_D_VIEWS) read PRODUCT_CATALOG_DATABASE_URL from process.env.
+    if (parsed.productCatalogDatabaseUrl) {
+      process.env.PRODUCT_CATALOG_DATABASE_URL = parsed.productCatalogDatabaseUrl;
+    }
     return {
       ...parsed,
       redisUrl,

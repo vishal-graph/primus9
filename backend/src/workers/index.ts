@@ -8,7 +8,8 @@ import { config } from '../config';
  * Jobs are enqueued via backend API to Redis; this process pulls from the
  * ai-jobs queue and runs handler code from the worker package (../worker/dist/handlers).
  * Handlers receive a synthetic SQS-style message; they use process.env from this process
- * (e.g. RUNWAY_API_KEY from backend/.env).
+ * (e.g. RUNWAY_API_KEY, GEMINI_API_KEY, PRODUCT_CATALOG_DATABASE_URL from backend/.env).
+ * Moodboards and TWO_D_VIEWS (3D bird view) load product catalog code from ../worker/dist.
  *
  * @see backend/src/workers/handlers.ts — dispatches to worker handlers
  * Note: Standalone SQS worker (worker/ run directly) is deprecated; use this Redis worker only.

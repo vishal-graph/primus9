@@ -521,6 +521,16 @@ export class GeminiClient {
           parts,
         },
       ],
+      ...(options.temperature !== undefined || options.maxOutputTokens !== undefined
+        ? {
+            generationConfig: {
+              ...(options.temperature !== undefined && { temperature: options.temperature }),
+              ...(options.maxOutputTokens !== undefined && {
+                maxOutputTokens: options.maxOutputTokens,
+              }),
+            },
+          }
+        : {}),
     };
 
     const controller = new AbortController();
@@ -573,7 +583,8 @@ export class GeminiClient {
 
       // PRESERVED: Validate response
       // FROM: moodboard-main/app/api/analyze-image/route.ts lines 150-162
-      if (!textContent || typeof textContent !== 'string' || textContent.trim().length < 10) {
+      const minLen = options.minTextLength ?? 10;
+      if (!textContent || typeof textContent !== 'string' || textContent.trim().length < minLen) {
         logger.error('Empty or invalid model response', { rawText });
         throw new DesignEngineError(
           DesignEngineErrorCode.INVALID_RESPONSE_FORMAT,

@@ -92,8 +92,7 @@ export async function getProject2DViews(
 
 export async function triggerRoom2DViewsGeneration(
   projectId: string,
-  roomId: string,
-  version?: number
+  roomId: string
 ): Promise<{ success: boolean; jobId?: string; error?: string }> {
   try {
     const headers = await getServerAuthHeaders();
@@ -112,7 +111,6 @@ export async function triggerRoom2DViewsGeneration(
         payload: {
           projectId,
           roomId,
-          version: version || 1,
         },
       }),
     });

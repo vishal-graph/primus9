@@ -64,6 +64,21 @@ export interface RegenerationOverrides {
 // Job Input/Output Types
 // ===========================================
 
+/** Single row match from Supabase product catalog (moodboard / 3D grounding). */
+export interface MoodboardCatalogMatch {
+  table: string;
+  id: string | number;
+  label: string;
+  summary: string;
+  score: number;
+}
+
+export interface MoodboardProductCatalogPayload {
+  promptSection: string;
+  matches: MoodboardCatalogMatch[];
+  resolvedAt: string;
+}
+
 /**
  * Input for moodboard generation job.
  * Received from SQS queue.
@@ -93,6 +108,9 @@ export interface MoodboardJobInput {
   
   /** Version number for this generation (1 for initial, 2+ for regenerations) */
   version?: number;
+
+  /** Optional Supabase catalog grounding (resolved in worker from PRODUCT_CATALOG_DATABASE_URL). */
+  productCatalog?: MoodboardProductCatalogPayload;
   
   /** Metadata from upstream service */
   metadata?: Record<string, unknown>;
@@ -288,6 +306,9 @@ export interface GeminiCallOptions {
   
   /** Abort signal for cancellation */
   abortSignal?: AbortSignal;
+
+  /** Minimum trimmed text length for analyzeContent (default 10; use 1 for short JSON). */
+  minTextLength?: number;
 }
 
 /**

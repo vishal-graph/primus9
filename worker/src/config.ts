@@ -17,6 +17,11 @@ const configSchema = z.object({
   // Database
   databaseUrl: z.string().url(),
 
+  /** Optional Supabase (or other) Postgres URL for product catalog grounding — moodboards / 3D views. */
+  productCatalogDatabaseUrl: z.string().url().optional(),
+  /** Strict verification mode: sofas/tiles must resolve from product catalog DB. */
+  strictCatalogSofaTiles: z.coerce.boolean().default(false),
+
   // Redis (optional for caching)
   redisUrl: z.string().default('redis://localhost:6379'),
   redisEnabled: z.coerce.boolean().default(true),
@@ -100,6 +105,8 @@ function loadConfig(): Config {
       serviceName: process.env.SERVICE_NAME,
       nodeEnv: process.env.NODE_ENV,
       databaseUrl: process.env.DATABASE_URL,
+      productCatalogDatabaseUrl: process.env.PRODUCT_CATALOG_DATABASE_URL,
+      strictCatalogSofaTiles: process.env.STRICT_CATALOG_SOFA_TILES,
       redisUrl: process.env.REDIS_URL,
       redisEnabled: process.env.REDIS_ENABLED,
       awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID,

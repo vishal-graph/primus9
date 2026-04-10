@@ -78,7 +78,9 @@ export async function generateMoodboard(
 
     // Step 3: Build the prompt
     // PRESERVED: Exact prompt construction from moodboard-main
-    const prompt = buildMoodboardPrompt(effectiveIntent);
+    const prompt = buildMoodboardPrompt(effectiveIntent, {
+      catalogSection: input.productCatalog?.promptSection,
+    });
     const promptHash = hashPrompt(prompt);
 
     logger.debug('Built moodboard prompt', {

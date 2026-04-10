@@ -77,7 +77,7 @@ function ComponentCheckoutSuccessContent() {
       return;
     }
     const load = async () => {
-      let pid = projectId;
+      let pid: string | undefined = projectId || undefined;
       if (!pid && slug) {
         const proj = await getProject(slug);
         pid = proj?.id;
@@ -180,7 +180,7 @@ function ComponentCheckoutSuccessContent() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {items.map((row: Record<string, unknown>, i: number) => (
+                {items.map((row, i: number) => (
                   <TableRow key={i} sx={{ borderColor: 'rgba(63,63,70,0.3)' }}>
                     <TableCell sx={{ color: '#e5e7eb', borderColor: 'rgba(63,63,70,0.3)' }}>
                       {String(row.componentName || '—')}

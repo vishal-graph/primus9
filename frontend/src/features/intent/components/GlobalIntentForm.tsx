@@ -523,7 +523,7 @@ export function GlobalIntentForm({
               row
               value={formData.interiorStyles?.[0] ?? ''}
               onChange={(e) => handleFieldChange('interiorStyles', e.target.value ? [e.target.value] : [])}
-            >
+             >
               {INTERIOR_STYLES.map((opt) => (
                 <FormControlLabel
                   key={opt.value}
@@ -909,7 +909,7 @@ export function GlobalIntentForm({
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={12}>
+          <Grid item xs={12}> 
             <Typography variant="body2" gutterBottom>
               Execution Priority
             </Typography>

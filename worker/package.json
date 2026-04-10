@@ -22,6 +22,7 @@
     "ioredis": "^5.3.2",
     "pdf-to-png-converter": "^3.11.0",
     "pdfkit": "^0.15.0",
+    "pg": "^8.13.1",
     "pino": "^8.17.2",
     "sharp": "^0.34.5",
     "uuid": "^9.0.1",
@@ -30,6 +31,7 @@
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/pdfkit": "^0.13.4",
+    "@types/pg": "^8.11.10",
     "@types/uuid": "^9.0.8",
     "@typescript-eslint/eslint-plugin": "^6.19.0",
     "@typescript-eslint/parser": "^6.19.0",

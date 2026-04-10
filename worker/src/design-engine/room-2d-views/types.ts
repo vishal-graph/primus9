@@ -28,6 +28,8 @@ export interface Room2DViewInput {
   /** Optional text from floor-plan spatial enrichment (position, adjacency, openings) */
   enrichedSpatialNotes?: string;
   designIntent?: DesignIntent;
+  /** Same catalog block as moodboard (from RoomMoodboard.metadata.productCatalog.promptSection). */
+  productCatalogPrompt?: string;
   version?: number;
 }
 

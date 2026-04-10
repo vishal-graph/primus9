@@ -6,7 +6,7 @@
 
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Box,
   Typography,
@@ -20,6 +20,10 @@ import {
   IconButton,
   Tooltip,
   alpha,
+  ToggleButton,
+  ToggleButtonGroup,
+  FormControlLabel,
+  Switch,
 } from '@mui/material';
 import { Refresh, ZoomIn, Download, CheckCircle } from '@mui/icons-material';
 import { getProjectData } from '@/lib/actions/floor-plan';
@@ -29,23 +33,29 @@ import {
   getActiveTwoDViewsJobs,
   Room2DView,
 } from '@/lib/actions/two-d-views';
+import {
+  TwoDViewsShoppableOverlay,
+  parseShoppableHotspots,
+} from './TwoDViewsShoppableOverlay';
 
 interface TwoDViewsStageProps {
   projectId: string;
+  projectSlug?: string;
   onStageChange?: (stage: string) => void;
 }
 
-/** One design per room: prefer BIRD_VIEW; if multiple BIRD_VIEWs, use latest by version. Fallback to latest view for legacy data. */
-function getSingleViewForRoom(views: Room2DView[]): Room2DView | undefined {
-  const birdViews = views.filter((v) => v.viewType === 'BIRD_VIEW');
-  if (birdViews.length > 0) {
-    return birdViews.reduce((a, b) => (a.version >= b.version ? a : b));
-  }
-  if (views.length === 0) return undefined;
-  return views.reduce((a, b) => (a.version >= b.version ? a : b));
+/** Any BIRD_VIEW exists (for tabs / generate-all). */
+function roomHasBirdView(views: Room2DView[]): boolean {
+  return views.some((v) => v.viewType === 'BIRD_VIEW');
 }
 
-export function TwoDViewsStage({ projectId }: TwoDViewsStageProps) {
+function birdViewsDescending(views: Room2DView[]): Room2DView[] {
+  return views
+    .filter((v) => v.viewType === 'BIRD_VIEW')
+    .sort((a, b) => b.version - a.version);
+}
+
+export function TwoDViewsStage({ projectId, onStageChange }: TwoDViewsStageProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rooms, setRooms] = useState<Array<{ id: string; name: string }>>([]);
@@ -54,6 +64,10 @@ export function TwoDViewsStage({ projectId }: TwoDViewsStageProps) {
   const [generatingRoomId, setGeneratingRoomId] = useState<string | null>(null);
   const [generatingRoomIds, setGeneratingRoomIds] = useState<Set<string>>(new Set());
   const [generatingAll, setGeneratingAll] = useState(false);
+  const [showProductTags, setShowProductTags] = useState(true);
+  /** null = show latest version for that room */
+  const [pickedBirdVersion, setPickedBirdVersion] = useState<number | null>(null);
+  const wasGeneratingThisRoomRef = useRef(false);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
 
   const loadRooms = useCallback(async () => {
@@ -103,11 +117,39 @@ export function TwoDViewsStage({ projectId }: TwoDViewsStageProps) {
 
   const activeRoom = rooms[activeRoomIndex];
   const roomViews = activeRoom ? viewsByRoom[activeRoom.id] || [] : [];
-  const activeView = getSingleViewForRoom(roomViews);
+  const birdViews = useMemo(() => birdViewsDescending(roomViews), [roomViews]);
+  const maxBirdVersion = birdViews[0]?.version ?? 0;
+  const effectiveVersion = pickedBirdVersion ?? maxBirdVersion;
+  const activeView =
+    birdViews.find((v) => v.version === effectiveVersion) ?? birdViews[0];
+  const shoppableHotspots = activeView
+    ? parseShoppableHotspots(activeView.metadata ?? null)
+    : [];
 
-  const completedRoomIds = rooms.filter((room) =>
-    getSingleViewForRoom(viewsByRoom[room.id] || [])
-  ).map((r) => r.id);
+  useEffect(() => {
+    setPickedBirdVersion(null);
+  }, [activeRoom?.id]);
+
+  useEffect(() => {
+    if (
+      pickedBirdVersion != null &&
+      !birdViews.some((v) => v.version === pickedBirdVersion)
+    ) {
+      setPickedBirdVersion(null);
+    }
+  }, [birdViews, pickedBirdVersion]);
+
+  useEffect(() => {
+    const generating = Boolean(activeRoom && generatingRoomId === activeRoom.id);
+    if (wasGeneratingThisRoomRef.current && !generating) {
+      setPickedBirdVersion(null);
+    }
+    wasGeneratingThisRoomRef.current = generating;
+  }, [generatingRoomId, activeRoom?.id]);
+
+  const completedRoomIds = rooms
+    .filter((room) => roomHasBirdView(viewsByRoom[room.id] || []))
+    .map((r) => r.id);
 
   const startPolling = useCallback(() => {
     if (pollRef.current) {
@@ -192,7 +234,7 @@ export function TwoDViewsStage({ projectId }: TwoDViewsStageProps) {
     try {
       const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
       for (const room of rooms) {
-        const hasView = getSingleViewForRoom(viewsByRoom[room.id] || []);
+        const hasView = roomHasBirdView(viewsByRoom[room.id] || []);
         if (hasView) continue;
         setGeneratingRoomIds((prev) => new Set(prev).add(room.id));
         const result = await triggerRoom2DViewsGeneration(projectId, room.id);
@@ -222,7 +264,7 @@ export function TwoDViewsStage({ projectId }: TwoDViewsStageProps) {
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${activeRoom?.name || 'room'}-bird-view.jpg`;
+      link.download = `${activeRoom?.name || 'room'}-bird-view-v${view.version}.jpg`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -328,12 +370,20 @@ export function TwoDViewsStage({ projectId }: TwoDViewsStageProps) {
           >
             {activeView ? (
               <>
-                <Box
-                  component="img"
-                  src={activeView.imageUrl}
-                  alt={`${activeRoom?.name} bird's-eye view`}
-                  sx={{ width: '100%', height: '100%', objectFit: 'contain', p: 2 }}
-                />
+                <Box sx={{ width: '100%', p: 2, position: 'relative' }}>
+                  <TwoDViewsShoppableOverlay
+                    hotspots={shoppableHotspots}
+                    showTags={showProductTags}
+                    onNavigateToBreakdown={() => onStageChange?.('components')}
+                  >
+                    <Box
+                      component="img"
+                      src={activeView.imageUrl}
+                      alt={`${activeRoom?.name} bird's-eye view`}
+                      sx={{ width: '100%', height: 'auto', maxHeight: 'min(70vh, 720px)', objectFit: 'contain' }}
+                    />
+                  </TwoDViewsShoppableOverlay>
+                </Box>
                 <Box sx={{ position: 'absolute', top: 16, right: 16, display: 'flex', gap: 1 }}>
                   <Tooltip title="View full size">
                     <IconButton sx={{ backgroundColor: 'rgba(255,255,255,0.9)' }}>
@@ -374,10 +424,120 @@ export function TwoDViewsStage({ projectId }: TwoDViewsStageProps) {
             <Box sx={{ mb: 2 }}>
               <Typography variant="body2" color="text.secondary">
                 {activeView
-                  ? 'Bird\'s-eye view generated for this room.'
+                  ? birdViews.length > 1
+                    ? `Viewing version ${activeView.version} of ${maxBirdVersion}. Regenerate adds a new version.`
+                    : 'Bird\'s-eye view generated for this room. Regenerate creates version history.'
                   : 'Generate a corner bird\'s-eye view for this room.'}
               </Typography>
+              {birdViews.length > 1 && (
+                <Box sx={{ mt: 2 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                    Version
+                  </Typography>
+                  <ToggleButtonGroup
+                    exclusive
+                    size="small"
+                    value={effectiveVersion}
+                    onChange={(_, v) => {
+                      if (v != null) setPickedBirdVersion(v);
+                    }}
+                    sx={{ flexWrap: 'wrap', gap: 0.5 }}
+                  >
+                    {birdViews
+                      .slice()
+                      .sort((a, b) => a.version - b.version)
+                      .map((v) => (
+                        <ToggleButton key={v.id} value={v.version} sx={{ textTransform: 'none' }}>
+                          v{v.version}
+                          {v.version === maxBirdVersion ? ' (latest)' : ''}
+                        </ToggleButton>
+                      ))}
+                  </ToggleButtonGroup>
+                </Box>
+              )}
+              {activeView && shoppableHotspots.length > 0 && (
+                <>
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                    Hover or click dots to view product details, dynamic price, and quick CTAs.
+                  </Typography>
+                  <FormControlLabel
+                    sx={{ mt: 1, mb: 0.5 }}
+                    control={
+                      <Switch
+                        size="small"
+                        checked={showProductTags}
+                        onChange={(_, checked) => setShowProductTags(checked)}
+                      />
+                    }
+                    label="Show product tags"
+                  />
+                  <Button
+                    size="small"
+                    variant="text"
+                    onClick={() => onStageChange?.('components')}
+                    sx={{ textTransform: 'none', px: 0 }}
+                  >
+                    View full room breakdown
+                  </Button>
+                </>
+              )}
+              {activeView && shoppableHotspots.length === 0 && (
+                <Box
+                  sx={{
+                    mt: 1.5,
+                    p: 1.5,
+                    border: '1px dashed',
+                    borderColor: 'divider',
+                    borderRadius: 1.5,
+                    backgroundColor: alpha('#FFFFFF', 0.6),
+                  }}
+                >
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                    Product tags are unavailable for this render. Hover/click product points will appear only when exact object-to-product mapping exists.
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => onStageChange?.('components')}
+                      sx={{ textTransform: 'none' }}
+                    >
+                      Explore Products
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="text"
+                      onClick={handleGenerate}
+                      disabled={generatingRoomId === activeRoom?.id}
+                      sx={{ textTransform: 'none' }}
+                    >
+                      {generatingRoomId === activeRoom?.id ? 'Regenerating...' : 'Regenerate With Tags'}
+                    </Button>
+                  </Box>
+                </Box>
+              )}
             </Box>
+            {activeView && (
+              <Button
+                fullWidth
+                variant="outlined"
+                color="primary"
+                startIcon={
+                  generatingRoomId === activeRoom?.id ? (
+                    <CircularProgress size={16} />
+                  ) : (
+                    <Refresh />
+                  )
+                }
+                onClick={handleGenerate}
+                disabled={generatingRoomId === activeRoom?.id}
+                sx={{ mb: 1, textTransform: 'none' }}
+              >
+                {generatingRoomId === activeRoom?.id
+                  ? 'Regenerating...'
+                  : 'Regenerate (new version)'}
+              </Button>
+            )}
             {!activeView && (
               <Button
                 fullWidth

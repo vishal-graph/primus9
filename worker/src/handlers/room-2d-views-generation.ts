@@ -6,6 +6,7 @@
  */
 
 import { Message } from '@aws-sdk/client-sqs';
+import { Prisma } from '@prisma/client';
 import { prismaClient as prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
 import { config } from '../config';
@@ -16,6 +17,10 @@ import {
   generateRoom2DViews,
   Room2DViewType,
 } from '../design-engine/room-2d-views';
+import {
+  inferShoppableHotspots,
+  type CatalogMatchForHotspot,
+} from '../services/shoppable-hotspots';
 
 // Use singleton prisma client from ../lib/prisma
 
@@ -75,7 +80,33 @@ interface Room2DViewsJobPayload {
   projectId: string;
   roomId: string;
   userId: string;
-  version?: number;
+}
+
+function productCatalogPromptFromMoodboardMetadata(metadata: unknown): string | undefined {
+  if (!metadata || typeof metadata !== 'object') return undefined;
+  const pc = (metadata as Record<string, unknown>).productCatalog;
+  if (!pc || typeof pc !== 'object') return undefined;
+  const ps = (pc as Record<string, unknown>).promptSection;
+  return typeof ps === 'string' && ps.trim() ? ps : undefined;
+}
+
+function catalogMatchesFromMoodboardMetadata(metadata: unknown): CatalogMatchForHotspot[] {
+  if (!metadata || typeof metadata !== 'object') return [];
+  const pc = (metadata as Record<string, unknown>).productCatalog;
+  if (!pc || typeof pc !== 'object') return [];
+  const matches = (pc as Record<string, unknown>).matches;
+  if (!Array.isArray(matches)) return [];
+  const out: CatalogMatchForHotspot[] = [];
+  for (const m of matches) {
+    if (!m || typeof m !== 'object') continue;
+    const o = m as Record<string, unknown>;
+    const table = typeof o.table === 'string' ? o.table : '';
+    const id = o.id;
+    const label = typeof o.label === 'string' ? o.label : '';
+    if (!table || (typeof id !== 'number' && typeof id !== 'string')) continue;
+    out.push({ table, id, label: label || `${table} #${id}` });
+  }
+  return out;
 }
 
 const VIEW_FILENAME_MAP: Record<Room2DViewType, string> = {
@@ -125,7 +156,6 @@ export async function handleRoom2DViewsGeneration(
     projectId = payload.projectId;
     roomId = payload.roomId;
     userId = payload.userId;
-    const version = payload.version || 1;
 
     if (!jobId || !projectId || !roomId || !userId) {
       logger.error('Missing required fields in payload', {
@@ -137,6 +167,13 @@ export async function handleRoom2DViewsGeneration(
       });
       return true;
     }
+
+    const maxBird = await prisma.room2DView.findFirst({
+      where: { roomId, viewType: 'BIRD_VIEW' },
+      orderBy: { version: 'desc' },
+      select: { version: true },
+    });
+    const version = (maxBird?.version ?? 0) + 1;
 
     logger.info('Processing room 2D views generation', {
       requestId,
@@ -202,8 +239,68 @@ export async function handleRoom2DViewsGeneration(
     }
 
     const moodboard = room.moodboards[0];
-    if (!moodboard) {
-      throw new Error('Missing moodboard for room');
+
+    let moodboardUrl!: string;
+    let productCatalogPrompt: string | undefined;
+    let catalogMatches!: CatalogMatchForHotspot[];
+
+    if (moodboard) {
+      moodboardUrl = moodboard.s3Key
+        ? await generateSignedUrl(config.s3BucketMoodboards, moodboard.s3Key, 3600)
+        : moodboard.imageUrl;
+      if (!moodboardUrl?.trim()) {
+        throw new Error('Moodboard has no usable image URL');
+      }
+      productCatalogPrompt = productCatalogPromptFromMoodboardMetadata(moodboard.metadata);
+      catalogMatches = catalogMatchesFromMoodboardMetadata(moodboard.metadata);
+    } else {
+      let resolved = false;
+
+      if (version > 1) {
+        const prevBird = await prisma.room2DView.findFirst({
+          where: { roomId, viewType: 'BIRD_VIEW' },
+          orderBy: { version: 'desc' },
+        });
+        if (prevBird && (prevBird.s3Key || prevBird.imageUrl)) {
+          moodboardUrl = prevBird.s3Key
+            ? await generateSignedUrl(config.s3BucketRenders, prevBird.s3Key, 3600)
+            : (prevBird.imageUrl as string);
+          productCatalogPrompt = productCatalogPromptFromMoodboardMetadata(prevBird.metadata);
+          catalogMatches = catalogMatchesFromMoodboardMetadata(prevBird.metadata);
+          resolved = true;
+          logger.info('No room moodboard; using previous bird view as reference', {
+            jobId,
+            roomId,
+            prevBirdVersion: prevBird.version,
+          });
+        }
+      }
+
+      if (!resolved) {
+        const fallbackMb = await prisma.roomMoodboard.findFirst({
+          where: { room: { projectId } },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (fallbackMb) {
+          moodboardUrl = fallbackMb.s3Key
+            ? await generateSignedUrl(config.s3BucketMoodboards, fallbackMb.s3Key, 3600)
+            : fallbackMb.imageUrl;
+          if (moodboardUrl?.trim()) {
+            productCatalogPrompt = productCatalogPromptFromMoodboardMetadata(fallbackMb.metadata);
+            catalogMatches = catalogMatchesFromMoodboardMetadata(fallbackMb.metadata);
+            resolved = true;
+            logger.info('No room moodboard; using latest moodboard from another room in project', {
+              jobId,
+              roomId,
+              sourceRoomId: fallbackMb.roomId,
+            });
+          }
+        }
+      }
+
+      if (!resolved) {
+        throw new Error('Missing moodboard for room');
+      }
     }
 
     const isometricElevation = await prisma.isometricFloorElevation.findFirst({
@@ -267,10 +364,6 @@ export async function handleRoom2DViewsGeneration(
       ? (room.metadata as any).adjacentRooms
       : [];
 
-    const moodboardUrl = moodboard.s3Key
-      ? await generateSignedUrl(config.s3BucketMoodboards, moodboard.s3Key, 3600)
-      : moodboard.imageUrl;
-
     const result = await generateRoom2DViews({
       jobId,
       projectId,
@@ -281,15 +374,17 @@ export async function handleRoom2DViewsGeneration(
       connectedRooms,
       isometricUrl: isometricSignedUrl,
       enrichedSpatialNotes,
+      productCatalogPrompt,
       version,
     });
 
-    const bucket = config.s3BucketRenders;
+    if (config.strictCatalogSofaTiles && catalogMatches.length === 0) {
+      throw new Error(
+        'STRICT_CATALOG_SOFA_TILES failed: no catalog matches found in moodboard metadata for hotspot generation'
+      );
+    }
 
-    // One design per room (strict): remove any existing BIRD_VIEW for this room before saving the new one.
-    await prisma.room2DView.deleteMany({
-      where: { roomId, viewType: 'BIRD_VIEW' },
-    });
+    const bucket = config.s3BucketRenders;
 
     for (const view of result.views) {
       const filename = VIEW_FILENAME_MAP[view.viewType];
@@ -313,6 +408,27 @@ export async function handleRoom2DViewsGeneration(
         },
       });
 
+      let shoppableHotspots: Awaited<ReturnType<typeof inferShoppableHotspots>> = [];
+      if (view.viewType === 'BIRD_VIEW' && catalogMatches.length > 0) {
+        shoppableHotspots = await inferShoppableHotspots({
+          imageBase64: view.imageData,
+          mimeType: view.mimeType,
+          matches: catalogMatches,
+        });
+      }
+
+      const viewMetadata: Prisma.InputJsonValue = {
+        roomId,
+        connectedRooms,
+        wallType: view.wallType,
+        generationSource: '2d_views_stage',
+        promptHash: view.promptHash,
+        ...(shoppableHotspots.length > 0 && {
+          shoppableHotspots: shoppableHotspots as unknown as Prisma.InputJsonValue,
+          hotspotsGeneratedAt: new Date().toISOString(),
+        }),
+      };
+
       await prisma.room2DView.create({
         data: {
           roomId,
@@ -323,13 +439,7 @@ export async function handleRoom2DViewsGeneration(
           geometryHash: view.geometryHash,
           styleHash: view.styleHash,
           jobId,
-          metadata: {
-            roomId,
-            connectedRooms,
-            wallType: view.wallType,
-            generationSource: '2d_views_stage',
-            promptHash: view.promptHash,
-          },
+          metadata: viewMetadata,
         },
       });
     }
@@ -367,6 +477,7 @@ export async function handleRoom2DViewsGeneration(
     const isRetryable = !(
       errorMessage.includes('Missing floor plan geometry') ||
       errorMessage.includes('Missing moodboard') ||
+      errorMessage.includes('no usable image URL') ||
       errorMessage.includes('Missing isometric elevation') ||
       errorMessage.includes('Invalid room geometry')
     );

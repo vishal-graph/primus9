@@ -244,7 +244,7 @@ export default function ProjectStagePage({ params }: ProjectStagePageProps) {
                   overflow: 'auto',
                 }}
               >
-                <ActiveStageComponent projectId={projectId} onStageChange={handleStageNavigate} projectSlug={slug} />
+                <ActiveStageComponent projectId={projectId} onStageChange={handleStageNavigate} />
               </Paper>
             </motion.div>
           </AnimatePresence>
