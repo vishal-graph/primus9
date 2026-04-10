@@ -61,7 +61,7 @@ logger.info(
  *            INTERIOR, COMPONENT_UPDATE, PDF_EXPORT, SENSE_INFERENCE
  */
 export const aiJobQueue = new Queue('ai-jobs', {
-  connection: queueConnection,
+  connection: queueConnection as any,
   defaultJobOptions: {
     attempts: 3,
     backoff: {
@@ -82,7 +82,9 @@ export const aiJobQueue = new Queue('ai-jobs', {
 /**
  * Queue Events for monitoring
  */
-export const aiJobEvents = new QueueEvents('ai-jobs', { connection: queueEventsConnection });
+export const aiJobEvents = new QueueEvents('ai-jobs', {
+  connection: queueEventsConnection as any,
+});
 
 aiJobEvents.on('completed', ({ jobId, returnvalue }) => {
   logger.info({ jobId, hasResult: !!returnvalue }, '[BullMQ] Job completed');
@@ -146,7 +148,7 @@ export function createAIWorker(concurrency: number = 3) {
       }
     },
     {
-      connection: workerConnection,
+      connection: workerConnection as any,
       concurrency, // Process up to N jobs concurrently
       // ROOM_WALKTHROUGH can take 5–10 min (gen4_turbo + upload + gen4_aleph poll). Keep lock long enough to avoid "could not renew lock".
       lockDuration: 15 * 60 * 1000, // 15 minutes (default 30s was too short)

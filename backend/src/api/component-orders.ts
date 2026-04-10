@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { errors } from '../lib/error-handler';
@@ -43,7 +43,7 @@ function parseCost(value: unknown): number {
  * List component orders for the project. Optional ?roomId= to filter by room.
  * Returns latest order per room when no roomId specified (for UI "ordered" badges).
  */
-router.get('/', async (req, res, next) => {
+router.get('/', async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
   try {
     const userId = req.userId!;
     const projectId = req.params.id as string;
@@ -95,7 +95,9 @@ router.get('/', async (req, res, next) => {
  * GET /api/projects/:id/component-orders/:orderId
  * Fetch a single component order (for receipt display).
  */
-router.get('/:orderId', async (req, res, next) => {
+router.get(
+  '/:orderId',
+  async (req: Request<{ id: string; orderId: string }>, res: Response, next: NextFunction) => {
   try {
     const userId = req.userId!;
     const projectId = req.params.id as string;
@@ -140,13 +142,14 @@ router.get('/:orderId', async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-});
+  }
+);
 
 /**
  * POST /api/projects/:projectId/component-orders
  * Create a component order (request) for a room's extracted components.
  */
-router.post('/', async (req, res, next) => {
+router.post('/', async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
   try {
     const userId = req.userId!;
     const projectId = req.params.id as string;
