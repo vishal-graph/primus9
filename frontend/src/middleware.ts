@@ -6,37 +6,45 @@ import { NextRequest, NextResponse } from 'next/server';
  * Replaces clerkMiddleware. Checks for `tatvaops_token` or `tatvaops_refresh` cookie.
  * Does NOT verify JWT signature here (edge runtime can't use jsonwebtoken easily).
  * Actual verification happens on the auth-service side via Bearer token on each API call.
- * 
- * Route protection rules:
- * - /login, /onboarding  → public (no redirect)
- * - /sign-in, /sign-up   → redirect to /login (Clerk routes killed)
- * - /krsna/*             → admin only (checked by backend, not here)
- * - everything else      → redirect to /login if no session cookies (access or refresh)
+ *
+ * PWA / TWA critical paths MUST bypass auth first — never redirect to /login.
  */
-
-const PUBLIC_PATHS = [
-  '/login',
-  '/onboarding',
-  '/_next',
-  '/favicon.ico',
-  '/logo.png',
-  '/manifest.webmanifest',
-  '/sw.js',
-  '/offline.html',
-  '/.well-known',
-  '/icons',
-  '/health',
-  '/api/health',
-  '/api/webhook',   // Razorpay / other inbound webhooks (no auth needed)
-];
 
 // Legacy Clerk routes — redirect to new login
 const LEGACY_AUTH_PATHS = ['/sign-in', '/sign-up'];
 
-function isPublic(pathname: string): boolean {
-  return PUBLIC_PATHS.some(
-    (p) => pathname === p || pathname.startsWith(p + '/')
-  );
+/**
+ * Public routes: PWA install, TWA Digital Asset Links, service worker, health probes, etc.
+ * Checked before any cookie logic so they are never redirected to /login.
+ */
+function isPublicPath(pathname: string): boolean {
+  if (pathname.startsWith('/_next')) return true;
+  if (pathname.startsWith('/icons')) return true;
+  if (pathname.startsWith('/.well-known')) return true;
+  if (pathname.startsWith('/api/webhook')) return true;
+
+  if (
+    pathname === '/login' ||
+    pathname.startsWith('/login/') ||
+    pathname === '/onboarding' ||
+    pathname.startsWith('/onboarding/')
+  ) {
+    return true;
+  }
+
+  if (
+    pathname === '/manifest.webmanifest' ||
+    pathname === '/sw.js' ||
+    pathname === '/offline.html' ||
+    pathname === '/favicon.ico' ||
+    pathname === '/logo.png' ||
+    pathname === '/health' ||
+    pathname === '/api/health'
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 export function middleware(req: NextRequest) {
@@ -47,15 +55,14 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(new URL('/login', req.url));
   }
 
-  // Public paths — let through
-  if (isPublic(pathname)) {
+  // PWA / TWA / static / webhooks — never require session cookies
+  if (isPublicPath(pathname)) {
     return NextResponse.next();
   }
 
   const token = req.cookies.get('tatvaops_token')?.value;
   const refresh = req.cookies.get('tatvaops_refresh')?.value;
 
-  // Allow refresh-only (e.g. access cookie expired and was removed by older deployments)
   if (!token && !refresh) {
     const loginUrl = new URL('/login', req.url);
     loginUrl.searchParams.set('redirect', pathname);
@@ -68,12 +75,10 @@ export function middleware(req: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Match all request paths EXCEPT:
-     * - _next/static (static files)
-     * - _next/image (image optimization)
-     * - favicon.ico
-     * - public files in /public/
+     * Skip middleware for immutable Next assets, optimized images, favicon,
+     * common static image extensions, and .webmanifest (PWA) so install/TWA probes
+     * never hit auth by accident.
      */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|webmanifest)$).*)',
   ],
 };
