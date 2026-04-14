@@ -1,23 +1,23 @@
 {
-  "packageId": "com.tatvaops.vision",
+  "packageId": "com.primus9.vision",
   "host": "app.primus9.ai",
   "name": "TatvaOps Vision",
   "launcherName": "Vision",
   "display": "standalone",
-  "themeColor": "#0a0a0f",
-  "themeColorDark": "#0a0a0f",
-  "navigationColor": "#0a0a0f",
-  "navigationColorDark": "#0a0a0f",
-  "navigationDividerColor": "#0a0a0f",
-  "navigationDividerColorDark": "#0a0a0f",
-  "backgroundColor": "#0a0a0f",
-  "enableNotifications": false,
+  "themeColor": "#0A0A0F",
+  "themeColorDark": "#000000",
+  "navigationColor": "#000000",
+  "navigationColorDark": "#000000",
+  "navigationDividerColor": "#000000",
+  "navigationDividerColorDark": "#000000",
+  "backgroundColor": "#0A0A0F",
+  "enableNotifications": true,
   "startUrl": "/",
   "iconUrl": "https://app.primus9.ai/icons/icon-512.png",
   "maskableIconUrl": "https://app.primus9.ai/icons/icon-maskable-512.png",
   "splashScreenFadeOutDuration": 300,
   "signingKey": {
-    "path": "./android.keystore",
+    "path": "android.keystore",
     "alias": "android"
   },
   "appVersionName": "1",
@@ -26,17 +26,26 @@
   "generatorApp": "bubblewrap-cli",
   "webManifestUrl": "https://app.primus9.ai/manifest.webmanifest",
   "fallbackType": "customtabs",
-  "features": {},
+  "features": {
+    "locationDelegation": {
+      "enabled": true
+    }
+  },
   "alphaDependencies": {
     "enabled": false
   },
   "enableSiteSettingsShortcut": true,
   "isChromeOSOnly": false,
   "isMetaQuest": false,
+  "fullScopeUrl": "https://app.primus9.ai/",
   "minSdkVersion": 21,
   "orientation": "portrait-primary",
   "fingerprints": [],
   "additionalTrustedOrigins": [],
   "retainedBundles": [],
+  "protocolHandlers": [],
+  "fileHandlers": [],
+  "launchHandlerClientMode": "",
+  "displayOverride": [],
   "appVersion": "1"
 }

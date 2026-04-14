@@ -41,7 +41,7 @@ The UI is ready, but you need to configure **Clerk API keys** to run the app.
    NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/dashboard
    NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/dashboard
    
-   NEXT_PUBLIC_API_URL=http://localhost:4000
+   NEXT_PUBLIC_API_URL=https://record-revenue-beaver-peers.trycloudflare.com
    ```
 
 5. **Restart Dev Server**

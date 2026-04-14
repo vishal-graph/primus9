@@ -92,7 +92,7 @@ async function startServer() {
   try {
     await connectDatabase();
 
-    const server = app.listen(config.port, () => {
+    const server = app.listen(config.port, '0.0.0.0', () => {
       logger.info(`🔐 TatvaOps Auth Service running on port ${config.port}`);
       logger.info(`🌍 Environment: ${config.nodeEnv}`);
       logger.info(`🔗 CORS origins: ${config.corsOrigins.join(', ')}`);

@@ -8,7 +8,7 @@
  */
 
 const AUTH_SERVICE_URL =
-  process.env.NEXT_PUBLIC_AUTH_SERVICE_URL || 'http://localhost:4500';
+  process.env.NEXT_PUBLIC_AUTH_SERVICE_URL || 'https://small-eva-underlying-ping.trycloudflare.com';
 
 export interface AuthUser {
   id: string;

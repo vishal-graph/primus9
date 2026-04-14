@@ -19,7 +19,7 @@ const configSchema = z.object({
   // Google OAuth
   googleClientId: z.string().min(1),
   googleClientSecret: z.string().min(1),
-  googleCallbackUrl: z.string().default('http://localhost:4500/auth/google/callback'),
+  googleCallbackUrl: z.string().default('https://small-eva-underlying-ping.trycloudflare.com/auth/google/callback'),
 
   // JWT (access token — also used for cookie maxAge so session doesn’t “expire” too soon)
   jwtSecret: z.string().min(32),
