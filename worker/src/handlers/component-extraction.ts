@@ -6,6 +6,7 @@
  */
 
 import { Message } from '@aws-sdk/client-sqs';
+import { Prisma } from '@prisma/client';
 import { logger } from '../lib/logger';
 import { getPrisma } from '../lib/prisma';
 import { config } from '../config';
@@ -27,6 +28,9 @@ import {
   PricingType,
 } from '../design-engine/component-extraction/types';
 import { GeminiPart } from '../design-engine/types';
+import { inferShoppableHotspots } from '../services/shoppable-hotspots';
+import { catalogMatchesFromMoodboardMetadata } from '../services/moodboard-catalog-matches';
+import { enrichExtractionRowsWithCatalog } from '../services/extraction-catalog-bridge';
 
 const prisma = getPrisma();
 
@@ -343,6 +347,7 @@ export async function handleComponentExtraction(
     const moodboard = await prisma.roomMoodboard.findFirst({
       where: { roomId },
       orderBy: { createdAt: 'desc' },
+      select: { s3Key: true, metadata: true },
     });
 
     if (!moodboard?.s3Key) {
@@ -371,6 +376,12 @@ export async function handleComponentExtraction(
         latestViewsByType.set(view.viewType, view);
       }
     }
+    /** Prefer highest BIRD_VIEW version (matches UI default) over newest-by-createdAt. */
+    const birdCandidates = views.filter((v) => v.viewType === 'BIRD_VIEW');
+    if (birdCandidates.length > 0) {
+      const highestBird = birdCandidates.reduce((a, b) => (a.version >= b.version ? a : b));
+      latestViewsByType.set('BIRD_VIEW', highestBird);
+    }
 
     const missingViews = REQUIRED_VIEW_TYPES.filter(
       (type) => !latestViewsByType.get(type) || !latestViewsByType.get(type)?.s3Key
@@ -386,7 +397,9 @@ export async function handleComponentExtraction(
     }
 
     const parts: GeminiPart[] = [];
-    parts.push(...(await buildImagePart(config.s3BucketMoodboards, moodboard.s3Key, 'Room moodboard')));
+    parts.push(
+      ...(await buildImagePart(config.s3BucketMoodboards, moodboard.s3Key, 'Room moodboard'))
+    );
     parts.push(...(await buildImagePart(config.s3BucketRenders, isometric.s3Key, '3D elevation (isometric)')));
 
     for (const viewType of REQUIRED_VIEW_TYPES) {
@@ -444,7 +457,9 @@ export async function handleComponentExtraction(
       });
       throw parseError;
     }
-    const rows = normalizeRows(parsed, room.name, roomMetrics);
+    const baseRows = normalizeRows(parsed, room.name, roomMetrics);
+    const moodCatalog = catalogMatchesFromMoodboardMetadata(moodboard.metadata);
+    const { rows, catalogSubset } = enrichExtractionRowsWithCatalog(baseRows, moodCatalog);
 
     if (rows.length === 0) {
       logger.warn('No valid component rows extracted', { roomId, projectId });
@@ -486,6 +501,133 @@ export async function handleComponentExtraction(
       },
     });
 
+    const birdForTags = latestViewsByType.get('BIRD_VIEW');
+    let extractionHotspotCount = 0;
+    const rowsLinkedToCatalog = rows.filter((r) => Boolean((r as { catalogMatch?: unknown }).catalogMatch))
+      .length;
+
+    const writePriceTagDiagnostics = async (diag: Record<string, unknown>) => {
+      if (!birdForTags?.id) return;
+      const prev =
+        birdForTags.metadata && typeof birdForTags.metadata === 'object'
+          ? { ...(birdForTags.metadata as Record<string, unknown>) }
+          : {};
+      await prisma.room2DView.update({
+        where: { id: birdForTags.id },
+        data: {
+          metadata: {
+            ...prev,
+            priceTagDiagnostics: {
+              at: new Date().toISOString(),
+              jobId,
+              ...diag,
+            },
+          } as Prisma.InputJsonValue,
+        },
+      });
+    };
+
+    if (birdForTags?.s3Key && catalogSubset.length > 0) {
+      try {
+        const { data: imgBuf, contentType } = await downloadFromS3(
+          config.s3BucketRenders,
+          birdForTags.s3Key
+        );
+        const mimeType = contentType || 'image/jpeg';
+        const imageBase64 = imgBuf.toString('base64');
+        const extractionHotspots = await inferShoppableHotspots({
+          imageBase64,
+          mimeType,
+          matches: catalogSubset,
+        });
+        if (extractionHotspots.length > 0) {
+          extractionHotspotCount = extractionHotspots.length;
+          const prevMeta =
+            birdForTags.metadata && typeof birdForTags.metadata === 'object'
+              ? { ...(birdForTags.metadata as Record<string, unknown>) }
+              : {};
+          await prisma.room2DView.update({
+            where: { id: birdForTags.id },
+            data: {
+              metadata: {
+                ...prevMeta,
+                shoppableHotspots: extractionHotspots as unknown as Prisma.InputJsonValue,
+                hotspotsGeneratedAt: new Date().toISOString(),
+                hotspotsSource: 'component_extraction',
+                extractionHotspotJobId: jobId,
+                priceTagDiagnostics: {
+                  at: new Date().toISOString(),
+                  jobId,
+                  moodboardCatalogCount: moodCatalog.length,
+                  linkedSkuCount: catalogSubset.length,
+                  extractionRowCount: rows.length,
+                  rowsLinkedToCatalog,
+                  hotspotCount: extractionHotspots.length,
+                  message: 'Price tags placed from catalog-linked extraction rows.',
+                },
+              } as Prisma.InputJsonValue,
+            },
+          });
+          logger.info('Bird view updated with extraction-driven shoppable hotspots', {
+            roomId,
+            birdViewId: birdForTags.id,
+            hotspotCount: extractionHotspots.length,
+            catalogLinked: catalogSubset.length,
+          });
+        } else {
+          logger.warn('Extraction catalog links present but hotspot model returned none', {
+            roomId,
+            catalogSubsetSize: catalogSubset.length,
+          });
+          await writePriceTagDiagnostics({
+            moodboardCatalogCount: moodCatalog.length,
+            linkedSkuCount: catalogSubset.length,
+            extractionRowCount: rows.length,
+            rowsLinkedToCatalog,
+            hotspotCount: 0,
+            message:
+              'Catalog SKUs were linked to extraction rows, but the vision step did not return hotspot coordinates. Try Generate price tags again or Regenerate view.',
+          });
+        }
+      } catch (hotspotErr) {
+        logger.warn(
+          {
+            err: hotspotErr instanceof Error ? hotspotErr.message : String(hotspotErr),
+            roomId,
+          },
+          'Failed to write extraction-driven hotspots (non-fatal)'
+        );
+      }
+    } else if (catalogSubset.length > 0 && !birdForTags?.s3Key) {
+      logger.warn('Catalog-linked extraction rows but missing BIRD_VIEW s3Key', { roomId });
+    } else if (birdForTags?.id) {
+      const message =
+        moodCatalog.length === 0
+          ? 'Moodboard has no product catalog matches, so price tags cannot be anchored to SKUs. Fix PRODUCT_CATALOG_DATABASE_URL / network so the worker can reach the catalog DB, then regenerate the moodboard for this room (or the whole project).'
+          : `Moodboard listed ${moodCatalog.length} catalog SKU(s), but no extraction row matched them above the confidence threshold.`;
+      logger.warn(
+        {
+          roomId,
+          moodboardCatalogCount: moodCatalog.length,
+          catalogSubsetSize: catalogSubset.length,
+          extractionRows: rows.length,
+        },
+        'Component extraction: skipping price tags — no catalog-linked rows'
+      );
+      try {
+        await writePriceTagDiagnostics({
+          moodboardCatalogCount: moodCatalog.length,
+          linkedSkuCount: catalogSubset.length,
+          extractionRowCount: rows.length,
+          rowsLinkedToCatalog,
+          hotspotCount: 0,
+          message,
+        });
+      } catch (e) {
+        logger.warn({ err: String(e), roomId }, 'Failed to write priceTagDiagnostics');
+      }
+    }
+
     await prisma.aIJob.update({
       where: { id: jobId },
       data: {
@@ -496,6 +638,12 @@ export async function handleComponentExtraction(
           roomName: room.name,
           rowCount: rows.length,
           s3Key,
+          priceTags: {
+            moodboardCatalogCount: moodCatalog.length,
+            linkedSkuCount: catalogSubset.length,
+            hotspotCount: extractionHotspotCount,
+            rowsLinkedToCatalog,
+          },
         },
       },
     });

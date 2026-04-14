@@ -150,7 +150,8 @@ export default function ProjectStagePage({ params }: ProjectStagePageProps) {
   };
 
   const handleStageNavigate = (stage: string) => {
-    const sid = stage as StageId;
+    const stageAliases: Record<string, StageId> = { components: 'component' };
+    const sid = (stageAliases[stage] ?? stage) as StageId;
     if (STAGES.find(s => s.id === sid)) {
       setActiveStage(sid);
       const newSlug = STAGE_TO_SLUG[sid] || 'floor-plan';

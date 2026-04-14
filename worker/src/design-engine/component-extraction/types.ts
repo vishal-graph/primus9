@@ -31,6 +31,16 @@ export interface ComponentExtractionRow {
   totalCost: number;
   calculation: string;
   notes: string;
+  /**
+   * Linked catalog SKU when this row was matched to moodboard `productCatalog.matches`
+   * during component extraction (used for bird-view price tags).
+   */
+  catalogMatch?: {
+    table: string;
+    id: string | number;
+    label: string;
+    score?: number;
+  };
 }
 
 export interface ComponentExtractionResult {

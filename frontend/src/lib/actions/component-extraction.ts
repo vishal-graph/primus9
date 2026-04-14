@@ -22,6 +22,13 @@ export interface ComponentExtractionRow {
   totalCost?: number | string;
   calculation?: string;
   notes?: string;
+  /** Present when row was linked to catalog during extraction (bird-view tags). */
+  catalogMatch?: {
+    table: string;
+    id: string | number;
+    label: string;
+    score?: number;
+  };
 }
 
 export interface RoomComponentTable {

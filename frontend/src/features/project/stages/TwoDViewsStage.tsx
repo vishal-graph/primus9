@@ -33,6 +33,8 @@ import {
   getActiveTwoDViewsJobs,
   Room2DView,
 } from '@/lib/actions/two-d-views';
+import { triggerComponentExtraction } from '@/lib/actions/component-extraction';
+import { getJobs } from '@/lib/actions/ai-job';
 import {
   TwoDViewsShoppableOverlay,
   parseShoppableHotspots,
@@ -65,6 +67,10 @@ export function TwoDViewsStage({ projectId, onStageChange }: TwoDViewsStageProps
   const [generatingRoomIds, setGeneratingRoomIds] = useState<Set<string>>(new Set());
   const [generatingAll, setGeneratingAll] = useState(false);
   const [showProductTags, setShowProductTags] = useState(true);
+  /** Rooms with in-flight COMPONENT_EXTRACTION jobs (maps catalog → bird-view dots). */
+  const [priceTagExtractionRoomIds, setPriceTagExtractionRoomIds] = useState<Set<string>>(
+    () => new Set()
+  );
   /** null = show latest version for that room */
   const [pickedBirdVersion, setPickedBirdVersion] = useState<number | null>(null);
   const wasGeneratingThisRoomRef = useRef(false);
@@ -125,6 +131,36 @@ export function TwoDViewsStage({ projectId, onStageChange }: TwoDViewsStageProps
   const shoppableHotspots = activeView
     ? parseShoppableHotspots(activeView.metadata ?? null)
     : [];
+  const hotspotsSource =
+    activeView?.metadata && typeof activeView.metadata === 'object'
+      ? String((activeView.metadata as Record<string, unknown>).hotspotsSource || '')
+      : '';
+  const priceTagDiagRaw =
+    activeView?.metadata && typeof activeView.metadata === 'object'
+      ? (activeView.metadata as Record<string, unknown>).priceTagDiagnostics
+      : null;
+  const priceTagDiagMessage =
+    priceTagDiagRaw &&
+    typeof priceTagDiagRaw === 'object' &&
+    typeof (priceTagDiagRaw as Record<string, unknown>).message === 'string'
+      ? String((priceTagDiagRaw as Record<string, unknown>).message)
+      : null;
+
+  const syncPriceTagExtractionJobs = useCallback(async () => {
+    const jobs = await getJobs({ projectId, type: 'COMPONENT_EXTRACTION', limit: 50 });
+    const activeRoomIds = new Set<string>();
+    for (const job of jobs.data || []) {
+      if (job.status === 'QUEUED' || job.status === 'PROCESSING') {
+        const payload = job.payload as { roomId?: string };
+        if (payload?.roomId) activeRoomIds.add(payload.roomId);
+      }
+    }
+    setPriceTagExtractionRoomIds(activeRoomIds);
+  }, [projectId]);
+
+  useEffect(() => {
+    void syncPriceTagExtractionJobs();
+  }, [projectId, syncPriceTagExtractionJobs]);
 
   useEffect(() => {
     setPickedBirdVersion(null);
@@ -208,6 +244,16 @@ export function TwoDViewsStage({ projectId, onStageChange }: TwoDViewsStageProps
     }
   }, [generatingRoomId, generatingRoomIds.size, startPolling]);
 
+  /** Poll while component extraction may be updating bird-view metadata. */
+  useEffect(() => {
+    if (priceTagExtractionRoomIds.size === 0) return;
+    const t = setInterval(async () => {
+      await syncPriceTagExtractionJobs();
+      await loadAllViews();
+    }, 12_000);
+    return () => clearInterval(t);
+  }, [priceTagExtractionRoomIds.size, syncPriceTagExtractionJobs, loadAllViews]);
+
   const handleGenerate = async () => {
     if (!activeRoom) return;
     setError(null);
@@ -225,6 +271,23 @@ export function TwoDViewsStage({ projectId, onStageChange }: TwoDViewsStageProps
       return;
     }
     startPolling();
+  };
+
+  const handleGeneratePriceTags = async () => {
+    if (!activeRoom) return;
+    setError(null);
+    setPriceTagExtractionRoomIds((prev) => new Set(prev).add(activeRoom.id));
+    const res = await triggerComponentExtraction(projectId, activeRoom.id);
+    if (!res.success) {
+      setPriceTagExtractionRoomIds((prev) => {
+        const next = new Set(prev);
+        next.delete(activeRoom.id);
+        return next;
+      });
+      setError(res.error || 'Failed to start component extraction');
+      return;
+    }
+    void syncPriceTagExtractionJobs();
   };
 
   const handleGenerateAll = async () => {
@@ -297,7 +360,15 @@ export function TwoDViewsStage({ projectId, onStageChange }: TwoDViewsStageProps
   }
 
   return (
-    <Box sx={{ p: { xs: 2, md: 4 }, height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <Box
+      sx={{
+        p: { xs: 2, md: 4 },
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        bgcolor: 'background.default',
+      }}
+    >
       <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <Typography variant="h5" fontWeight={600} gutterBottom>
           3D Views
@@ -323,7 +394,10 @@ export function TwoDViewsStage({ projectId, onStageChange }: TwoDViewsStageProps
         </Alert>
       )}
 
-      <Paper elevation={0} sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+      <Paper
+        elevation={0}
+        sx={{ borderBottom: 1, borderColor: 'divider', mb: 3, bgcolor: 'background.paper' }}
+      >
         <Tabs
           value={activeRoomIndex}
           onChange={(_, newValue) => setActiveRoomIndex(newValue)}
@@ -333,12 +407,13 @@ export function TwoDViewsStage({ projectId, onStageChange }: TwoDViewsStageProps
           {rooms.map((room) => {
             const isComplete = completedRoomIds.includes(room.id);
             const isGenerating = generatingRoomIds.has(room.id);
+            const isPriceTagBusy = priceTagExtractionRoomIds.has(room.id);
             return (
               <Tab
                 key={room.id}
                 label={
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    {isGenerating ? (
+                    {isGenerating || isPriceTagBusy ? (
                       <CircularProgress size={14} sx={{ flexShrink: 0 }} />
                     ) : isComplete ? (
                       <CheckCircle sx={{ fontSize: 16, color: 'success.main' }} />
@@ -356,7 +431,7 @@ export function TwoDViewsStage({ projectId, onStageChange }: TwoDViewsStageProps
         <Grid item xs={12} md={8}>
           <Paper
             elevation={0}
-            sx={{
+            sx={(theme) => ({
               border: 1,
               borderColor: 'divider',
               borderRadius: 2,
@@ -364,9 +439,12 @@ export function TwoDViewsStage({ projectId, onStageChange }: TwoDViewsStageProps
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: alpha('#37474F', 0.02),
+              bgcolor:
+                theme.palette.mode === 'dark'
+                  ? alpha(theme.palette.common.white, 0.06)
+                  : theme.palette.grey[100],
               position: 'relative',
-            }}
+            })}
           >
             {activeView ? (
               <>
@@ -374,7 +452,7 @@ export function TwoDViewsStage({ projectId, onStageChange }: TwoDViewsStageProps
                   <TwoDViewsShoppableOverlay
                     hotspots={shoppableHotspots}
                     showTags={showProductTags}
-                    onNavigateToBreakdown={() => onStageChange?.('components')}
+                    onNavigateToBreakdown={() => onStageChange?.('component')}
                   >
                     <Box
                       component="img"
@@ -386,13 +464,23 @@ export function TwoDViewsStage({ projectId, onStageChange }: TwoDViewsStageProps
                 </Box>
                 <Box sx={{ position: 'absolute', top: 16, right: 16, display: 'flex', gap: 1 }}>
                   <Tooltip title="View full size">
-                    <IconButton sx={{ backgroundColor: 'rgba(255,255,255,0.9)' }}>
+                    <IconButton
+                      sx={(theme) => ({
+                        bgcolor: alpha(theme.palette.background.paper, 0.92),
+                        boxShadow: 1,
+                        '&:hover': { bgcolor: theme.palette.background.paper },
+                      })}
+                    >
                       <ZoomIn />
                     </IconButton>
                   </Tooltip>
                   <Tooltip title="Download">
                     <IconButton
-                      sx={{ backgroundColor: 'rgba(255,255,255,0.9)' }}
+                      sx={(theme) => ({
+                        bgcolor: alpha(theme.palette.background.paper, 0.92),
+                        boxShadow: 1,
+                        '&:hover': { bgcolor: theme.palette.background.paper },
+                      })}
                       onClick={() => handleDownload(activeView)}
                     >
                       <Download />
@@ -417,7 +505,10 @@ export function TwoDViewsStage({ projectId, onStageChange }: TwoDViewsStageProps
           </Paper>
         </Grid>
         <Grid item xs={12} md={4}>
-          <Paper elevation={0} sx={{ border: 1, borderColor: 'divider', borderRadius: 2, p: 2 }}>
+          <Paper
+            elevation={0}
+            sx={{ border: 1, borderColor: 'divider', borderRadius: 2, p: 2, bgcolor: 'background.paper' }}
+          >
             <Typography variant="subtitle1" fontWeight={600} gutterBottom>
               Status
             </Typography>
@@ -457,6 +548,16 @@ export function TwoDViewsStage({ projectId, onStageChange }: TwoDViewsStageProps
               )}
               {activeView && shoppableHotspots.length > 0 && (
                 <>
+                  {hotspotsSource === 'component_extraction' && (
+                    <Typography variant="caption" color="success.main" sx={{ mt: 0.5, display: 'block' }}>
+                      Tags mapped from component extraction + catalog (re-run below to refresh).
+                    </Typography>
+                  )}
+                  {hotspotsSource === 'two_d_views' && (
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                      Tags from bird-view generation (moodboard catalog). Use extraction to refine.
+                    </Typography>
+                  )}
                   <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
                     Hover or click dots to view product details, dynamic price, and quick CTAs.
                   </Typography>
@@ -474,35 +575,60 @@ export function TwoDViewsStage({ projectId, onStageChange }: TwoDViewsStageProps
                   <Button
                     size="small"
                     variant="text"
-                    onClick={() => onStageChange?.('components')}
+                    onClick={() => onStageChange?.('component')}
                     sx={{ textTransform: 'none', px: 0 }}
                   >
                     View full room breakdown
                   </Button>
                 </>
               )}
+              {activeView && shoppableHotspots.length === 0 && priceTagDiagMessage && (
+                <Alert severity="warning" sx={{ mt: 1.5 }}>
+                  <Typography variant="body2" sx={{ mb: 0.5 }}>
+                    Last price-tag run did not produce dots on this image
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {priceTagDiagMessage}
+                  </Typography>
+                </Alert>
+              )}
               {activeView && shoppableHotspots.length === 0 && (
                 <Box
-                  sx={{
+                  sx={(theme) => ({
                     mt: 1.5,
                     p: 1.5,
                     border: '1px dashed',
                     borderColor: 'divider',
                     borderRadius: 1.5,
-                    backgroundColor: alpha('#FFFFFF', 0.6),
-                  }}
+                    bgcolor:
+                      theme.palette.mode === 'dark'
+                        ? alpha(theme.palette.primary.main, 0.12)
+                        : alpha(theme.palette.primary.main, 0.06),
+                  })}
                 >
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                    Product tags are unavailable for this render. Hover/click product points will appear only when exact object-to-product mapping exists.
+                    Product tags need catalog-backed mapping on this image. Run component extraction here
+                    to link extracted items to your moodboard catalog SKUs and place hover dots.
                   </Typography>
                   <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                     <Button
                       size="small"
-                      variant="outlined"
-                      onClick={() => onStageChange?.('components')}
+                      variant="contained"
+                      onClick={handleGeneratePriceTags}
+                      disabled={priceTagExtractionRoomIds.has(activeRoom.id)}
                       sx={{ textTransform: 'none' }}
                     >
-                      Explore Products
+                      {priceTagExtractionRoomIds.has(activeRoom.id)
+                        ? 'Mapping…'
+                        : 'Generate price tags'}
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => onStageChange?.('component')}
+                      sx={{ textTransform: 'none' }}
+                    >
+                      Room breakdown
                     </Button>
                     <Button
                       size="small"
@@ -511,7 +637,7 @@ export function TwoDViewsStage({ projectId, onStageChange }: TwoDViewsStageProps
                       disabled={generatingRoomId === activeRoom?.id}
                       sx={{ textTransform: 'none' }}
                     >
-                      {generatingRoomId === activeRoom?.id ? 'Regenerating...' : 'Regenerate With Tags'}
+                      {generatingRoomId === activeRoom?.id ? 'Regenerating...' : 'Regenerate view'}
                     </Button>
                   </Box>
                 </Box>

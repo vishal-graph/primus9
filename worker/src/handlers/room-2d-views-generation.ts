@@ -7,6 +7,15 @@
 
 import { Message } from '@aws-sdk/client-sqs';
 import { Prisma } from '@prisma/client';
+
+function isPrismaUniqueConstraintError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code?: string }).code === 'P2002'
+  );
+}
 import { prismaClient as prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
 import { config } from '../config';
@@ -21,6 +30,7 @@ import {
   inferShoppableHotspots,
   type CatalogMatchForHotspot,
 } from '../services/shoppable-hotspots';
+import { catalogMatchesFromMoodboardMetadata } from '../services/moodboard-catalog-matches';
 
 // Use singleton prisma client from ../lib/prisma
 
@@ -88,25 +98,6 @@ function productCatalogPromptFromMoodboardMetadata(metadata: unknown): string | 
   if (!pc || typeof pc !== 'object') return undefined;
   const ps = (pc as Record<string, unknown>).promptSection;
   return typeof ps === 'string' && ps.trim() ? ps : undefined;
-}
-
-function catalogMatchesFromMoodboardMetadata(metadata: unknown): CatalogMatchForHotspot[] {
-  if (!metadata || typeof metadata !== 'object') return [];
-  const pc = (metadata as Record<string, unknown>).productCatalog;
-  if (!pc || typeof pc !== 'object') return [];
-  const matches = (pc as Record<string, unknown>).matches;
-  if (!Array.isArray(matches)) return [];
-  const out: CatalogMatchForHotspot[] = [];
-  for (const m of matches) {
-    if (!m || typeof m !== 'object') continue;
-    const o = m as Record<string, unknown>;
-    const table = typeof o.table === 'string' ? o.table : '';
-    const id = o.id;
-    const label = typeof o.label === 'string' ? o.label : '';
-    if (!table || (typeof id !== 'number' && typeof id !== 'string')) continue;
-    out.push({ table, id, label: label || `${table} #${id}` });
-  }
-  return out;
 }
 
 const VIEW_FILENAME_MAP: Record<Room2DViewType, string> = {
@@ -385,63 +376,97 @@ export async function handleRoom2DViewsGeneration(
     }
 
     const bucket = config.s3BucketRenders;
-
-    for (const view of result.views) {
-      const filename = VIEW_FILENAME_MAP[view.viewType];
-      const extension = view.mimeType.includes('png') ? 'png' : 'jpg';
-      const baseKey = `projects/${projectId}/rooms/${roomId}/2d-views`;
-      const versionSuffix = version > 1 ? `/v${version}` : '';
-      const s3Key = `${baseKey}${versionSuffix}/${filename}.${extension}`;
-
-      await uploadToS3({
-        bucket,
-        key: s3Key,
-        body: Buffer.from(view.imageData, 'base64'),
-        contentType: view.mimeType,
-        metadata: {
-          jobId,
-          projectId,
-          roomId,
-          viewType: view.viewType,
-          version: String(version),
-          generationSource: '2d_views_stage',
-        },
+    const maxPersistAttempts = 8;
+    let persisted = false;
+    let persistAttempt = 0;
+    while (!persisted && persistAttempt < maxPersistAttempts) {
+      persistAttempt += 1;
+      const maxBirdNow = await prisma.room2DView.findFirst({
+        where: { roomId, viewType: 'BIRD_VIEW' },
+        orderBy: { version: 'desc' },
+        select: { version: true },
       });
+      const writeVersion = (maxBirdNow?.version ?? 0) + 1;
 
-      let shoppableHotspots: Awaited<ReturnType<typeof inferShoppableHotspots>> = [];
-      if (view.viewType === 'BIRD_VIEW' && catalogMatches.length > 0) {
-        shoppableHotspots = await inferShoppableHotspots({
-          imageBase64: view.imageData,
-          mimeType: view.mimeType,
-          matches: catalogMatches,
-        });
+      try {
+        for (const view of result.views) {
+          const filename = VIEW_FILENAME_MAP[view.viewType];
+          const extension = view.mimeType.includes('png') ? 'png' : 'jpg';
+          const baseKey = `projects/${projectId}/rooms/${roomId}/2d-views`;
+          const versionSuffix = writeVersion > 1 ? `/v${writeVersion}` : '';
+          const s3Key = `${baseKey}${versionSuffix}/${filename}.${extension}`;
+
+          await uploadToS3({
+            bucket,
+            key: s3Key,
+            body: Buffer.from(view.imageData, 'base64'),
+            contentType: view.mimeType,
+            metadata: {
+              jobId,
+              projectId,
+              roomId,
+              viewType: view.viewType,
+              version: String(writeVersion),
+              generationSource: '2d_views_stage',
+            },
+          });
+
+          let shoppableHotspots: Awaited<ReturnType<typeof inferShoppableHotspots>> = [];
+          if (view.viewType === 'BIRD_VIEW' && catalogMatches.length > 0) {
+            shoppableHotspots = await inferShoppableHotspots({
+              imageBase64: view.imageData,
+              mimeType: view.mimeType,
+              matches: catalogMatches,
+            });
+          }
+
+          const viewMetadata: Prisma.InputJsonValue = {
+            roomId,
+            connectedRooms,
+            wallType: view.wallType,
+            generationSource: '2d_views_stage',
+            promptHash: view.promptHash,
+            ...(shoppableHotspots.length > 0 && {
+              shoppableHotspots: shoppableHotspots as unknown as Prisma.InputJsonValue,
+              hotspotsGeneratedAt: new Date().toISOString(),
+              hotspotsSource: 'two_d_views',
+            }),
+          };
+
+          await prisma.room2DView.create({
+            data: {
+              roomId,
+              viewType: view.viewType as any,
+              imageUrl: `s3://${bucket}/${s3Key}`,
+              s3Key,
+              version: writeVersion,
+              geometryHash: view.geometryHash,
+              styleHash: view.styleHash,
+              jobId,
+              metadata: viewMetadata,
+            },
+          });
+        }
+        persisted = true;
+      } catch (err: unknown) {
+        if (isPrismaUniqueConstraintError(err)) {
+          logger.warn(
+            {
+              jobId,
+              roomId,
+              attempt: persistAttempt,
+              writeVersion,
+            },
+            'room2DView version conflict (concurrent TWO_D_VIEWS); retrying with next version'
+          );
+          continue;
+        }
+        throw err;
       }
+    }
 
-      const viewMetadata: Prisma.InputJsonValue = {
-        roomId,
-        connectedRooms,
-        wallType: view.wallType,
-        generationSource: '2d_views_stage',
-        promptHash: view.promptHash,
-        ...(shoppableHotspots.length > 0 && {
-          shoppableHotspots: shoppableHotspots as unknown as Prisma.InputJsonValue,
-          hotspotsGeneratedAt: new Date().toISOString(),
-        }),
-      };
-
-      await prisma.room2DView.create({
-        data: {
-          roomId,
-          viewType: view.viewType as any,
-          imageUrl: `s3://${bucket}/${s3Key}`,
-          s3Key,
-          version,
-          geometryHash: view.geometryHash,
-          styleHash: view.styleHash,
-          jobId,
-          metadata: viewMetadata,
-        },
-      });
+    if (!persisted) {
+      throw new Error('Failed to persist 2D views after repeated version conflicts');
     }
 
     await updateJobStatus(jobId, 'COMPLETED', {
