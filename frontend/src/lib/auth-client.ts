@@ -8,7 +8,7 @@
  */
 
 const AUTH_SERVICE_URL =
-  process.env.NEXT_PUBLIC_AUTH_SERVICE_URL || 'https://small-eva-underlying-ping.trycloudflare.com';
+  process.env.NEXT_PUBLIC_AUTH_SERVICE_URL || 'https://auth.primus9.ai';
 
 export interface AuthUser {
   id: string;

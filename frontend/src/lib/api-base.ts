@@ -5,7 +5,7 @@
  * - Server (Server Actions / RSC): Prefer BACKEND_API_URL when set and normalized.
  *
  * **Dev tip:** If you see `fetch failed` / `httpRedirectFetch` on dashboard load, the Node
- * server often cannot reach `https://record-revenue-beaver-peers.trycloudflare.com` (IPv6/Docker). Either set BACKEND_API_URL
+ * server often cannot reach direct local backend endpoints in some dev setups (IPv6/Docker). Either set BACKEND_API_URL
  * to `http://127.0.0.1:4000`, or omit it in development so we call this Next app’s origin
  * and use `next.config` rewrites to the backend (`/api/*` → backend).
  */

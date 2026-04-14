@@ -41,7 +41,7 @@ The UI is ready, but you need to configure **Clerk API keys** to run the app.
    NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/dashboard
    NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/dashboard
    
-   NEXT_PUBLIC_API_URL=https://record-revenue-beaver-peers.trycloudflare.com
+   NEXT_PUBLIC_API_URL=https://api.primus9.ai
    ```
 
 5. **Restart Dev Server**
