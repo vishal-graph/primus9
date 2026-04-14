@@ -5,7 +5,7 @@ const csp = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "img-src 'self' data: blob: https:",
   "font-src 'self' https://fonts.gstatic.com data:",
-  "connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://*.googleapis.com https://*.gstatic.com https://*.amazonaws.com https://api.razorpay.com https://lumberjack.razorpay.com ws: wss:",
+  "connect-src 'self' https://app.primus9.ai https://www.primus9.ai https://auth.primus9.ai https://api.primus9.ai https://www.google-analytics.com https://region1.google-analytics.com https://*.googleapis.com https://*.gstatic.com https://*.amazonaws.com https://api.razorpay.com https://lumberjack.razorpay.com ws: wss:",
   "frame-src 'self' https://www.google.com https://*.google.com https://*.gstatic.com https://api.razorpay.com",
   "frame-ancestors 'none'",
   "base-uri 'self'",
