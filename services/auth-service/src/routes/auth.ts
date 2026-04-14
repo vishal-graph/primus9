@@ -70,8 +70,8 @@ function setAuthCookies(res: Response, accessToken: string, refreshToken: string
 
 function clearAuthCookies(res: Response): void {
   const common = cookieCommonOpts();
-  res.clearCookie(ACCESS_COOKIE, { path: '/', ...common, httpOnly: false });
-  res.clearCookie(REFRESH_COOKIE, { path: '/', ...common, httpOnly: true });
+  res.clearCookie(ACCESS_COOKIE, { ...common, httpOnly: false });
+  res.clearCookie(REFRESH_COOKIE, { ...common, httpOnly: true });
 }
 
 // ============================================================
