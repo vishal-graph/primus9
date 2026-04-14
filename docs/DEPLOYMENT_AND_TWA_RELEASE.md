@@ -47,6 +47,12 @@ Production builds must not use `http://localhost` for user-facing OAuth callback
 | **Backend API** | `GET /health`, `GET /health/ready`, `GET /health/live` | See `backend/src/api/health.ts`. |
 | **Auth service** | `GET /health` | JSON liveness in `services/auth-service/src/index.ts`. |
 
+### 1.6 TWA Android wrapper (Bubblewrap)
+
+For **app.primus9.ai**, use the committed Bubblewrap manifest and step-by-step build notes:
+
+[`../android-twa/TWA_BUILD.md`](../android-twa/TWA_BUILD.md)
+
 ---
 
 ## Phase 2 — Auth cookies and CORS (final)

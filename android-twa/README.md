@@ -2,6 +2,9 @@
 
 This folder documents how to produce a **Play Store–ready** Trusted Web Activity wrapper. Generated Gradle projects and keystores should **not** be committed until your team’s policy allows it.
 
+**Primus9 production TWA (manifest + APK steps):**  
+[`TWA_BUILD.md`](./TWA_BUILD.md) — uses committed [`twa-manifest.json`](./twa-manifest.json) for **app.primus9.ai** / **com.tatvaops.vision**.
+
 **Full runbook (deploy, cookies, CORS, asset links, device tests, Play prep):**  
 [`../docs/DEPLOYMENT_AND_TWA_RELEASE.md`](../docs/DEPLOYMENT_AND_TWA_RELEASE.md)
 
