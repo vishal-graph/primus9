@@ -61,10 +61,11 @@ export async function requireAuth(
 
     let payload: JwtPayload;
     try {
-      const decoded = jwt.decode(token) as JwtPayload;
-      if (!decoded) throw new Error();
-      payload = decoded;
-    } catch (err) {
+      payload = jwt.verify(token, config.jwtSecret, {
+        issuer: 'tatvaops-auth-service',
+        audience: 'tatvaops-apps',
+      }) as JwtPayload;
+    } catch {
       throw errors.unauthorized('Invalid or expired token');
     }
 
@@ -116,7 +117,10 @@ export async function optionalAuth(
 
     if (token) {
       try {
-        const payload = jwt.decode(token) as JwtPayload;
+        const payload = jwt.verify(token, config.jwtSecret, {
+          issuer: 'tatvaops-auth-service',
+          audience: 'tatvaops-apps',
+        }) as JwtPayload;
         if (payload.userId) {
           req.authUser = {
             id: payload.userId,

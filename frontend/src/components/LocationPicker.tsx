@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { Box, TextField, Paper, Typography, Button, CircularProgress } from '@mui/material';
 import { MyLocation } from '@mui/icons-material';
 import { GoogleMap, LoadScript, Marker } from '@react-google-maps/api';
+import { geolocationErrorMessage } from '@/lib/geolocation-errors';
 
 const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyBKmPxBMomVgWR5r5eKJoImpjUCu4NcUAE';
 
@@ -233,7 +234,12 @@ export default function LocationPicker({ value, onChange, error, helperText }: L
       (error) => {
         setGettingLocation(false);
         console.error('Error getting location:', error);
-        alert(`Unable to get your location: ${error.message}`);
+        const code = (error as GeolocationPositionError).code;
+        const msg =
+          typeof code === 'number'
+            ? geolocationErrorMessage(code, error.message)
+            : `Unable to get your location: ${error.message}`;
+        alert(msg);
       },
       {
         enableHighAccuracy: true,

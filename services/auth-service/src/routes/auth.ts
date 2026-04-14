@@ -29,39 +29,49 @@ function cookieDomainOpts(): { domain?: string } {
   return { domain: d };
 }
 
+/** Cross-site credentialed fetches (e.g. SPA on www + auth API on api) need SameSite=None + Secure in production. */
+function cookieSameSite(): 'lax' | 'none' {
+  if (config.nodeEnv === 'production' && config.cookieSecure) {
+    return 'none';
+  }
+  return 'lax';
+}
+
+function cookieCommonOpts() {
+  return {
+    ...cookieDomainOpts(),
+    secure: config.cookieSecure,
+    sameSite: cookieSameSite(),
+    path: '/' as const,
+  };
+}
+
 function setAuthCookies(res: Response, accessToken: string, refreshToken: string): void {
-  const isProduction = config.nodeEnv === 'production';
-  const domainOpts = cookieDomainOpts();
   // Keep cookies for the full refresh window. JWT inside the access cookie still expires
   // per JWT_ACCESS_EXPIRY; APIs must verify exp. Otherwise the browser drops tatvaops_token
   // after 1h while tatvaops_refresh remains → Next middleware sends users to /login on refresh.
   const sessionMaxAge = getRefreshTokenExpiryMs();
+  const common = cookieCommonOpts();
 
   // Access token cookie — readable by JS for Authorization header injection
   res.cookie(ACCESS_COOKIE, accessToken, {
     httpOnly: false,
-    secure: config.cookieSecure,
-    sameSite: isProduction ? 'lax' : 'lax',
-    ...domainOpts,
+    ...common,
     maxAge: sessionMaxAge,
-    path: '/',
   });
 
   // Refresh token cookie — httpOnly, NOT readable by JS
   res.cookie(REFRESH_COOKIE, refreshToken, {
     httpOnly: true,
-    secure: config.cookieSecure,
-    sameSite: isProduction ? 'lax' : 'lax',
-    ...domainOpts,
+    ...common,
     maxAge: sessionMaxAge,
-    path: '/',
   });
 }
 
 function clearAuthCookies(res: Response): void {
-  const domainOpts = cookieDomainOpts();
-  res.clearCookie(ACCESS_COOKIE, { path: '/', ...domainOpts });
-  res.clearCookie(REFRESH_COOKIE, { path: '/', ...domainOpts });
+  const common = cookieCommonOpts();
+  res.clearCookie(ACCESS_COOKIE, { path: '/', ...common, httpOnly: false });
+  res.clearCookie(REFRESH_COOKIE, { path: '/', ...common, httpOnly: true });
 }
 
 // ============================================================

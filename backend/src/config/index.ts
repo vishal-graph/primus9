@@ -24,6 +24,9 @@ const configSchema = z.object({
   corsOrigins: z.string().transform((s) => s.split(',')).default('http://localhost:3000,http://localhost:3001'),
   serviceName: z.string().default('primus9-api'),
 
+  /** Must match `JWT_SECRET` in services/auth-service (access JWT verification). */
+  jwtSecret: z.string().min(32),
+
   // Database (Supabase PostgreSQL)
   databaseUrl: z.string().url(),
 
@@ -172,6 +175,7 @@ function loadConfig(): Config {
       nodeEnv: process.env.NODE_ENV,
       corsOrigins: process.env.CORS_ORIGINS,
       serviceName: process.env.SERVICE_NAME,
+      jwtSecret: process.env.JWT_SECRET,
 
       // Database
       databaseUrl: process.env.DATABASE_URL,

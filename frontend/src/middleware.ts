@@ -20,6 +20,13 @@ const PUBLIC_PATHS = [
   '/_next',
   '/favicon.ico',
   '/logo.png',
+  '/manifest.webmanifest',
+  '/sw.js',
+  '/offline.html',
+  '/.well-known',
+  '/icons',
+  '/health',
+  '/api/health',
   '/api/webhook',   // Razorpay / other inbound webhooks (no auth needed)
 ];
 

@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { GoogleMap, useJsApiLoader, Marker } from '@react-google-maps/api';
 import { completeOnboarding, OnboardingData, getOnboardingStatus } from '@/lib/auth-client';
+import { geolocationErrorMessage } from '@/lib/geolocation-errors';
 
 // ============================================================
 // Types
@@ -262,7 +263,7 @@ function Step2({ data, onChange }: { data: Step2Data; onChange: (d: Step2Data) =
 
   const handleCurrentLocation = () => {
     if (!navigator.geolocation) {
-      alert('Geolocation is not supported by your browser');
+      alert('Location is not supported in this browser. Search for your address on the map instead.');
       return;
     }
 
@@ -277,7 +278,12 @@ function Step2({ data, onChange }: { data: Step2Data; onChange: (d: Step2Data) =
       (error) => {
         setGettingLocation(false);
         console.error('Error getting location:', error);
-        alert(`Unable to get your location: ${error.message}`);
+        const code = (error as GeolocationPositionError).code;
+        const msg =
+          typeof code === 'number'
+            ? geolocationErrorMessage(code, error.message)
+            : `Unable to get your location: ${error.message}`;
+        alert(msg);
       },
       {
         enableHighAccuracy: true,

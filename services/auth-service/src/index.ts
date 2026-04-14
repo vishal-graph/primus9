@@ -26,7 +26,9 @@ app.use(cors({
   origin: config.corsOrigins,
   credentials: true,        // Allow cookies cross-origin
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  optionsSuccessStatus: 204,
+  maxAge: 86_400,
 }));
 
 // ============================================================

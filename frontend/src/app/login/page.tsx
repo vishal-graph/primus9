@@ -5,6 +5,9 @@ import { useEffect } from 'react';
 import { loginWithGoogle, getAccessToken } from '@/lib/auth-client';
 import { useRouter } from 'next/navigation';
 
+const TERMS_URL = process.env.NEXT_PUBLIC_TERMS_URL || '#';
+const PRIVACY_URL = process.env.NEXT_PUBLIC_PRIVACY_POLICY_URL || '#';
+
 export default function LoginPage() {
   const router = useRouter();
 
@@ -138,9 +141,9 @@ export default function LoginPage() {
           margin: '28px 0 0',
         }}>
           By continuing, you agree to TatvaOps'{' '}
-          <a href="#" style={{ color: 'rgba(99,102,241,0.8)', textDecoration: 'none' }}>Terms of Service</a>
+          <a href={TERMS_URL} target="_blank" rel="noopener noreferrer" style={{ color: 'rgba(99,102,241,0.8)', textDecoration: 'none' }}>Terms of Service</a>
           {' '}and{' '}
-          <a href="#" style={{ color: 'rgba(99,102,241,0.8)', textDecoration: 'none' }}>Privacy Policy</a>
+          <a href={PRIVACY_URL} target="_blank" rel="noopener noreferrer" style={{ color: 'rgba(99,102,241,0.8)', textDecoration: 'none' }}>Privacy Policy</a>
         </p>
       </div>
     </div>

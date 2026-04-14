@@ -1,6 +1,7 @@
 import { getServerAuthHeaders } from '@/lib/server-auth';
 import type { ApiResponse } from '@/types';
 import { getApiBase } from '@/lib/api-base';
+import { fetchWithResilience } from '@/lib/fetch-with-resilience';
 
 /**
  * API Client
@@ -20,7 +21,7 @@ interface RequestOptions extends Omit<RequestInit, 'body'> {
 }
 
 /**
- * Server-side API client (uses Clerk auth)
+ * Server-side API client (Bearer from session cookie)
  * Use this in Server Actions and Server Components
  */
 export async function serverFetch<T>(
@@ -28,6 +29,7 @@ export async function serverFetch<T>(
   options: RequestOptions = {}
 ): Promise<ApiResponse<T>> {
   const { params, retry = 3, body, ...fetchOptions } = options;
+  const { signal: _omitSignal, ...fetchInit } = fetchOptions;
 
   // Get API base URL (uses BACKEND_API_URL for server-side)
   const API_BASE_URL = getApiBase();
@@ -54,13 +56,20 @@ export async function serverFetch<T>(
 
   let lastError: Error | null = null;
 
+  const method = (fetchOptions.method || 'GET').toUpperCase();
+  const skipRetry = method !== 'GET' && method !== 'HEAD';
+
   for (let attempt = 0; attempt < retry; attempt++) {
     try {
-      const response = await fetch(url.toString(), {
-        ...fetchOptions,
-        headers,
-        body: body ? JSON.stringify(body) : undefined,
-      });
+      const response = await fetchWithResilience(
+        url.toString(),
+        {
+          ...fetchInit,
+          headers,
+          body: body ? JSON.stringify(body) : undefined,
+        },
+        { timeoutMs: 25_000, retries: skipRetry ? 0 : 1 }
+      );
 
       const data = await response.json();
 
@@ -82,8 +91,6 @@ export async function serverFetch<T>(
       };
     } catch (error) {
       lastError = error as Error;
-      
-      // Don't retry on last attempt
       if (attempt < retry - 1) {
         await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000));
       }
@@ -109,6 +116,7 @@ export function createClientFetch(token: string | null) {
     options: RequestOptions = {}
   ): Promise<ApiResponse<T>> {
     const { params, retry = 3, body, ...fetchOptions } = options;
+    const { signal: _omitSignal, ...fetchInit } = fetchOptions;
 
     // Get API base URL (uses NEXT_PUBLIC_API_URL for client-side)
     const API_BASE_URL = getApiBase();
@@ -131,13 +139,20 @@ export function createClientFetch(token: string | null) {
 
     let lastError: Error | null = null;
 
+    const method = (fetchOptions.method || 'GET').toUpperCase();
+    const skipRetry = method !== 'GET' && method !== 'HEAD';
+
     for (let attempt = 0; attempt < retry; attempt++) {
       try {
-        const response = await fetch(url.toString(), {
-          ...fetchOptions,
-          headers,
-          body: body ? JSON.stringify(body) : undefined,
-        });
+        const response = await fetchWithResilience(
+          url.toString(),
+          {
+            ...fetchInit,
+            headers,
+            body: body ? JSON.stringify(body) : undefined,
+          },
+          { timeoutMs: 25_000, retries: skipRetry ? 0 : 1 }
+        );
 
         const data = await response.json();
 

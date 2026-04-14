@@ -1,15 +1,14 @@
 /**
  * TatvaOps Vision - Project Workspace (Clean URL)
- * 
+ *
  * Route: /project/[slug]/[stage]
- * e.g. /project/my-living-room/moodboard
- * 
- * Unified workspace with tab navigation for all design stages.
+ * Heavy stage panels are loaded with `next/dynamic` to reduce first-load JS.
  */
 
 'use client';
 
 import { useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -20,6 +19,7 @@ import {
   Paper,
   alpha,
   Chip,
+  Skeleton,
 } from '@mui/material';
 import {
   UploadFile,
@@ -32,26 +32,58 @@ import {
 } from '@mui/icons-material';
 import { pageFadeVariants } from '@/motion/pageTransitions';
 
-// Import stage components
-import { FloorPlanStage } from '@/features/project/stages/FloorPlanStage';
-import { IntentStage } from '@/features/project/stages/IntentStage';
-import { MoodboardStage } from '@/features/project/stages/MoodboardStage';
-import { ElevationStage } from '@/features/project/stages/ElevationStage';
-import { TwoDViewsStage } from '@/features/project/stages/TwoDViewsStage';
-import { ComponentStage } from '@/features/project/stages/ComponentStage';
-import { WalkthroughStage } from '@/features/project/stages/WalkthroughStage';
-import { ExportStage } from '@/features/project/stages/ExportStage';
+function StagePlaceholder() {
+  return (
+    <Box sx={{ p: 2 }}>
+      <Skeleton variant="rectangular" height={220} sx={{ mb: 2, borderRadius: 1 }} />
+      <Skeleton variant="rectangular" height={120} sx={{ borderRadius: 1 }} />
+    </Box>
+  );
+}
+
+const FloorPlanStage = dynamic(
+  () => import('@/features/project/stages/FloorPlanStage').then((m) => m.FloorPlanStage),
+  { loading: () => <StagePlaceholder /> }
+);
+const IntentStage = dynamic(
+  () => import('@/features/project/stages/IntentStage').then((m) => m.IntentStage),
+  { loading: () => <StagePlaceholder /> }
+);
+const MoodboardStage = dynamic(
+  () => import('@/features/project/stages/MoodboardStage').then((m) => m.MoodboardStage),
+  { loading: () => <StagePlaceholder /> }
+);
+const ElevationStage = dynamic(
+  () => import('@/features/project/stages/ElevationStage').then((m) => m.ElevationStage),
+  { loading: () => <StagePlaceholder /> }
+);
+const TwoDViewsStage = dynamic(
+  () => import('@/features/project/stages/TwoDViewsStage').then((m) => m.TwoDViewsStage),
+  { loading: () => <StagePlaceholder /> }
+);
+const ComponentStage = dynamic(
+  () => import('@/features/project/stages/ComponentStage').then((m) => m.ComponentStage),
+  { loading: () => <StagePlaceholder /> }
+);
+const WalkthroughStage = dynamic(
+  () => import('@/features/project/stages/WalkthroughStage').then((m) => m.WalkthroughStage),
+  { loading: () => <StagePlaceholder /> }
+);
+const ExportStage = dynamic(
+  () => import('@/features/project/stages/ExportStage').then((m) => m.ExportStage),
+  { loading: () => <StagePlaceholder /> }
+);
 
 // Stage slug ↔ internal ID mapping
 const SLUG_TO_STAGE: Record<string, string> = {
   'floor-plan': 'floor_plan',
-  'intent': 'intent',
-  'moodboard': 'moodboard',
-  'elevations': 'elevation',
+  intent: 'intent',
+  moodboard: 'moodboard',
+  elevations: 'elevation',
   '2d-views': 'two_d_views',
-  'components': 'component',
-  'walkthrough': 'room_walkthrough',
-  'export': 'export',
+  components: 'component',
+  walkthrough: 'room_walkthrough',
+  export: 'export',
 };
 
 const STAGE_TO_SLUG: Record<string, string> = Object.fromEntries(
@@ -68,23 +100,35 @@ type StageId =
   | 'room_walkthrough'
   | 'export';
 
-interface Stage {
+type StageComponentProps = { projectId: string; onStageChange?: (stage: string) => void };
+
+const STAGE_LAZY: Record<StageId, React.ComponentType<StageComponentProps>> = {
+  floor_plan: FloorPlanStage,
+  intent: IntentStage,
+  moodboard: MoodboardStage,
+  elevation: ElevationStage,
+  two_d_views: TwoDViewsStage,
+  component: ComponentStage,
+  room_walkthrough: WalkthroughStage,
+  export: ExportStage,
+};
+
+interface StageMeta {
   id: StageId;
   label: string;
   icon: React.ReactElement;
-  component: React.ComponentType<{ projectId: string; onStageChange?: (stage: string) => void }>;
   comingSoon?: boolean;
 }
 
-const STAGES: Stage[] = [
-  { id: 'floor_plan', label: 'Floor Plan', icon: <UploadFile />, component: FloorPlanStage },
-  { id: 'intent', label: 'Intent', icon: <Palette />, component: IntentStage },
-  { id: 'moodboard', label: 'Moodboard', icon: <CollectionsBookmark />, component: MoodboardStage },
-  { id: 'elevation', label: 'Elevations', icon: <ViewInAr />, component: ElevationStage },
-  { id: 'two_d_views', label: '3D Views', icon: <ViewInAr />, component: TwoDViewsStage },
-  { id: 'component', label: 'Components', icon: <Tune />, component: ComponentStage },
-  { id: 'room_walkthrough', label: 'Walkthrough', icon: <Videocam />, component: WalkthroughStage },
-  { id: 'export', label: 'Export', icon: <Download />, component: ExportStage, comingSoon: true },
+const STAGES: StageMeta[] = [
+  { id: 'floor_plan', label: 'Floor Plan', icon: <UploadFile /> },
+  { id: 'intent', label: 'Intent', icon: <Palette /> },
+  { id: 'moodboard', label: 'Moodboard', icon: <CollectionsBookmark /> },
+  { id: 'elevation', label: 'Elevations', icon: <ViewInAr /> },
+  { id: 'two_d_views', label: '3D Views', icon: <ViewInAr /> },
+  { id: 'component', label: 'Components', icon: <Tune /> },
+  { id: 'room_walkthrough', label: 'Walkthrough', icon: <Videocam /> },
+  { id: 'export', label: 'Export', icon: <Download />, comingSoon: true },
 ];
 
 interface ProjectStagePageProps {
@@ -98,15 +142,12 @@ export default function ProjectStagePage({ params }: ProjectStagePageProps) {
   const { slug, stage: stageSlug } = params;
   const router = useRouter();
 
-  // Resolve the URL slug to an internal stage ID
   const stageId = (SLUG_TO_STAGE[stageSlug] || 'floor_plan') as StageId;
 
   const [activeStage, setActiveStage] = useState<StageId>(stageId);
-  // We need the real project UUID for API calls — fetch it from the backend
   const [projectId, setProjectId] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
-  // Fetch project by slug to get the real UUID
   useEffect(() => {
     const fetchProject = async () => {
       try {
@@ -126,11 +167,10 @@ export default function ProjectStagePage({ params }: ProjectStagePageProps) {
     fetchProject();
   }, [slug]);
 
-  // Sync stage from URL when it changes
   useEffect(() => {
     const resolved = SLUG_TO_STAGE[stageSlug] as StageId | undefined;
     if (resolved) {
-      const stage = STAGES.find(s => s.id === resolved);
+      const stage = STAGES.find((s) => s.id === resolved);
       if (stage && !stage.comingSoon) {
         setActiveStage(resolved);
       } else {
@@ -142,7 +182,7 @@ export default function ProjectStagePage({ params }: ProjectStagePageProps) {
   }, [stageSlug, slug, router]);
 
   const handleStageChange = (_event: React.SyntheticEvent, newValue: StageId) => {
-    const stage = STAGES.find(s => s.id === newValue);
+    const stage = STAGES.find((s) => s.id === newValue);
     if (stage?.comingSoon) return;
     setActiveStage(newValue);
     const newSlug = STAGE_TO_SLUG[newValue] || 'floor-plan';
@@ -152,16 +192,24 @@ export default function ProjectStagePage({ params }: ProjectStagePageProps) {
   const handleStageNavigate = (stage: string) => {
     const stageAliases: Record<string, StageId> = { components: 'component' };
     const sid = (stageAliases[stage] ?? stage) as StageId;
-    if (STAGES.find(s => s.id === sid)) {
+    if (STAGES.find((s) => s.id === sid)) {
       setActiveStage(sid);
       const newSlug = STAGE_TO_SLUG[sid] || 'floor-plan';
       router.push(`/project/${slug}/${newSlug}`);
     }
   };
 
-  const ActiveStageComponent = STAGES.find(s => s.id === activeStage)?.component || FloorPlanStage;
+  const ActiveStageComponent = STAGE_LAZY[activeStage] ?? FloorPlanStage;
 
-  if (loading) return null;
+  if (loading) {
+    return (
+      <Container maxWidth="xl" sx={{ py: 3 }}>
+        <Skeleton variant="rectangular" height={56} sx={{ mb: 2, borderRadius: 2 }} />
+        <Skeleton variant="rectangular" height={400} sx={{ borderRadius: 2 }} />
+      </Container>
+    );
+  }
+
   if (!projectId) {
     router.replace('/dashboard');
     return null;
@@ -170,11 +218,7 @@ export default function ProjectStagePage({ params }: ProjectStagePageProps) {
   return (
     <Container maxWidth="xl" sx={{ py: 3, height: '100%' }}>
       <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-        {/* Stage Tabs */}
-        <Paper
-          elevation={0}
-          sx={{ mb: 3, border: 1, borderColor: 'divider', borderRadius: 2 }}
-        >
+        <Paper elevation={0} sx={{ mb: 3, border: 1, borderColor: 'divider', borderRadius: 2 }}>
           <Tabs
             value={activeStage}
             onChange={handleStageChange}
@@ -224,7 +268,6 @@ export default function ProjectStagePage({ params }: ProjectStagePageProps) {
           </Tabs>
         </Paper>
 
-        {/* Stage Content */}
         <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
           <AnimatePresence mode="wait">
             <motion.div

@@ -2,11 +2,11 @@
  * TatvaOps Vision - Providers
  *
  * Composition of all application providers:
- * - Clerk (auth: useUser, useClerk, useAuth)
  * - Redux Store Provider
  * - MUI Theme Provider
  * - React Query Provider
  * - Snackbar Provider
+ * - PWA service worker, optional install prompt, optional web analytics
  */
 
 'use client';
@@ -16,6 +16,9 @@ import { Provider as ReduxProvider } from 'react-redux';
 import { ThemeProvider, CssBaseline } from '@mui/material';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SnackbarProvider } from '@/ui/feedback/SnackbarProvider';
+import { ServiceWorkerRegister } from '@/components/ServiceWorkerRegister';
+import { PwaInstallPrompt } from '@/components/PwaInstallPrompt';
+import { WebAnalytics } from '@/components/WebAnalytics';
 
 import { store } from '@/store';
 import { theme } from '@/ui/theme';
@@ -42,6 +45,9 @@ export function Providers({ children }: ProvidersProps) {
         <ThemeProvider theme={theme}>
           <CssBaseline />
           <SnackbarProvider>
+            <ServiceWorkerRegister />
+            <WebAnalytics />
+            <PwaInstallPrompt />
             {children}
           </SnackbarProvider>
         </ThemeProvider>
