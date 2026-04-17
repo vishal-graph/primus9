@@ -22,6 +22,8 @@ interface Step4Data {
   businessLat: number | null; businessLng: number | null; businessAddress: string;
 }
 
+const MAPS_LIBRARIES: ('places')[] = ['places'];
+
 // ============================================================
 // Styles (shared tokens)
 // ============================================================
@@ -142,8 +144,12 @@ function Step1({ data, onChange }: { data: Step1Data; onChange: (d: Step1Data) =
 
 function Step2({ data, onChange }: { data: Step2Data; onChange: (d: Step2Data) => void }) {
   const { isLoaded } = useJsApiLoader({
-    googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY || '',
-    libraries: ['places'],
+    // Support both legacy and current env key names.
+    googleMapsApiKey:
+      process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ||
+      process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY ||
+      '',
+    libraries: MAPS_LIBRARIES,
   });
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -192,7 +198,14 @@ function Step2({ data, onChange }: { data: Step2Data; onChange: (d: Step2Data) =
 
       onChange({ lat, lng, formattedAddress: address, pincode });
     } catch {
-      onChange({ ...data, lat, lng });
+      // If reverse geocoding fails, keep coordinates so user can still continue.
+      onChange({
+        ...data,
+        lat,
+        lng,
+        formattedAddress: data.formattedAddress || `${lat.toFixed(6)}, ${lng.toFixed(6)}`,
+        pincode: data.pincode || '',
+      });
     }
   };
 
@@ -673,7 +686,7 @@ export default function OnboardingPage() {
   // Step-specific validation
   const canProceed = (): boolean => {
     if (step === 1) return step1.phoneNumber.length >= 10 && (step1.whatsappSame || step1.whatsappNumber.length >= 10);
-    if (step === 2) return !!step2.formattedAddress;
+    if (step === 2) return !!step2.formattedAddress || (step2.lat !== 0 && step2.lng !== 0);
     if (step === 3) return !!step3.persona;
     return true;
   };
