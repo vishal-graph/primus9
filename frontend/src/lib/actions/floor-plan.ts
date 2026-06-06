@@ -205,11 +205,10 @@ export async function uploadFloorPlan(
       return { success: false, error: 'Failed to confirm upload' };
     }
 
-    // Construct the full S3 URL
-    const s3Url = `https://tatvaops-vision-production-floorplans.s3.ap-south-1.amazonaws.com/${key}`;
+    const { data: confirmData } = await confirmResponse.json();
+    const imageUrl = confirmData.downloadUrl as string;
     
-    // Return actualSlug so frontend can navigate to /project/[slug]/[stage]
-    return { success: true, imageUrl: s3Url, projectId: actualProjectId, slug: actualSlug };
+    return { success: true, imageUrl, projectId: actualProjectId, slug: actualSlug };
   } catch (error) {
     console.error('Upload error:', error);
     return { success: false, error: 'Upload failed' };

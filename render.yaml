@@ -1,12 +1,74 @@
-# Primus9 — Render Blueprint
-# Deploys API server + BullMQ background worker from the same Dockerfile
+# TatvaOps Vision — Render Blueprint
+# API (web) + BullMQ worker from repo-root Dockerfile (builds backend + worker packages)
+#
+# Deploy: Render Dashboard → New → Blueprint → connect repo → apply this file.
+# Set secret env vars in the shared group (or per service) before first deploy succeeds.
+
+envVarGroups:
+  - name: tatvaops-vision-shared
+    envVars:
+      # ── Required (set in Render dashboard; no default) ──
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: S3_BUCKET_FLOORPLANS
+        sync: false
+      - key: S3_BUCKET_MOODBOARDS
+        sync: false
+      - key: S3_BUCKET_RENDERS
+        sync: false
+      - key: S3_BUCKET_EXPORTS
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      # ── Recommended ──
+      - key: CORS_ORIGINS
+        sync: false
+      - key: PRODUCT_CATALOG_DATABASE_URL
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RUNWAY_API_KEY
+        sync: false
+      # ── Defaults (override in dashboard if needed) ──
+      - key: NODE_ENV
+        value: production
+      - key: REDIS_ENABLED
+        value: "true"
+      - key: AWS_REGION
+        value: ap-south-1
+      - key: S3_SIGNED_URL_EXPIRY
+        value: "3600"
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: GEMINI_IMAGE_MODEL
+        value: gemini-3-pro-image-preview
+      - key: GEMINI_TEXT_API_VERSION
+        value: v1
+      - key: GEMINI_IMAGE_API_VERSION
+        value: v1beta
+      - key: WORKER_CONCURRENCY
+        value: "1"
+      - key: ALLOW_X_USER_ID_BYPASS
+        value: "false"
 
 services:
-  # ── Express API Server ──
+  # ── Express API ──
   - type: web
     name: primus9-api
     runtime: docker
-    dockerfilePath: ./backend/Dockerfile
+    dockerfilePath: ./Dockerfile
     dockerContext: .
     region: singapore
     plan: starter
@@ -14,25 +76,23 @@ services:
     numInstances: 1
     branch: release
     envVars:
+      - fromGroup: tatvaops-vision-shared
       - key: MODE
         value: api
       - key: PORT
         value: "4000"
-      - key: NODE_ENV
-        value: production
 
-  # ── BullMQ Background Worker ──
+  # ── BullMQ background worker ──
   - type: worker
     name: primus9-worker
     runtime: docker
-    dockerfilePath: ./backend/Dockerfile
+    dockerfilePath: ./Dockerfile
     dockerContext: .
     region: singapore
     plan: starter
     numInstances: 1
     branch: release
     envVars:
+      - fromGroup: tatvaops-vision-shared
       - key: MODE
         value: worker
-      - key: NODE_ENV
-        value: production

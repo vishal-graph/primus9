@@ -30,6 +30,7 @@
     "@google/genai": "^1.40.0",
     "@google/generative-ai": "^0.2.1",
     "@prisma/client": "^5.8.0",
+    "@supabase/supabase-js": "^2.107.0",
     "@types/pdfkit": "^0.17.4",
     "bullmq": "^5.1.0",
     "cors": "^2.8.5",

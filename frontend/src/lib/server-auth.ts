@@ -10,19 +10,29 @@
 import { cookies } from 'next/headers';
 
 interface ServerAuthHeaders {
-  Authorization: string;
+  Authorization?: string;
+  'x-user-id'?: string;
   [key: string]: string;
 }
 
 /**
- * Returns { Authorization: 'Bearer <token>' } or null if not authenticated.
+ * Returns auth headers (Bearer token when present, else x-user-id when bypass cookie is set),
+ * or null if neither is available.
  * Use this in place of Clerk's auth().getToken().
  */
 export async function getServerAuthHeaders(): Promise<ServerAuthHeaders | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get('tatvaops_token')?.value;
-  if (!token) return null;
-  return { Authorization: `Bearer ${token}` };
+  if (token) return { Authorization: `Bearer ${token}` };
+
+  const bypass = (process.env.NEXT_PUBLIC_ALLOW_X_USER_ID_BYPASS || '').trim().toLowerCase();
+  const allowBypass =
+    bypass === '1' || bypass === 'true' || bypass === 'yes' || process.env.NODE_ENV === 'development';
+
+  if (!allowBypass) return null;
+  const xUserId = cookieStore.get('x_user_id')?.value;
+  if (!xUserId) return null;
+  return { 'x-user-id': xUserId };
 }
 
 /**

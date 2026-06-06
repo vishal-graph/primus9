@@ -20,6 +20,39 @@ interface JwtPayload {
   onboardingCompleted: boolean;
 }
 
+function isUuid(value: string): boolean {
+  // Accept any 36-char UUID-like value (we only need a stable identifier here).
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim());
+}
+
+function allowHeaderBypass(): boolean {
+  const raw = (process.env.ALLOW_X_USER_ID_BYPASS || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
+function tryApplyHeaderBypass(req: Request): boolean {
+  if (!allowHeaderBypass()) return false;
+
+  const header = req.headers['x-user-id'];
+  const userId = typeof header === 'string' ? header.trim() : '';
+  if (!userId || !isUuid(userId)) return false;
+
+  req.authUser = {
+    id: userId,
+    email: '',
+    role: 'EXTERNAL',
+    isInternal: false,
+    onboardingCompleted: true,
+  };
+
+  // Backward-compat shims — existing route handlers use req.userId / req.user / req.clerkUserId
+  req.userId = userId;
+  req.clerkUserId = userId;
+  req.user = { id: userId, email: '', isInternal: false };
+  req.headers['x-user-id'] = userId;
+  return true;
+}
+
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
@@ -44,6 +77,12 @@ export async function requireAuth(
   next: NextFunction
 ): Promise<void> {
   try {
+    // Temporary integration mode: allow upstream apps to pass x-user-id without JWT.
+    if (tryApplyHeaderBypass(req)) {
+      next();
+      return;
+    }
+
     let token = '';
     const authHeader = req.headers.authorization;
 
@@ -105,6 +144,11 @@ export async function optionalAuth(
   next: NextFunction
 ): Promise<void> {
   try {
+    if (tryApplyHeaderBypass(req)) {
+      next();
+      return;
+    }
+
     let token = '';
     const authHeader = req.headers.authorization;
 

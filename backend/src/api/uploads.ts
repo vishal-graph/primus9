@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
 import { errors } from '../lib/error-handler';
 import { storageService } from '../services/storage';
+import { config } from '../config';
 import { AssetType } from '@prisma/client';
 
 const router = Router();
@@ -239,71 +240,27 @@ router.get('/proxy-download', async (req, res, next) => {
       res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
 
-    // Try to use AWS SDK directly if we have s3Key (fastest and most reliable)
+    // Try direct storage download if we have s3Key (fastest and most reliable)
     if (s3Key && typeof s3Key === 'string') {
       try {
-        const { storageService } = await import('../services/storage');
-        const { GetObjectCommand } = await import('@aws-sdk/client-s3');
-        const { config } = await import('../config');
-        const { Readable } = await import('stream');
-        
-        // Use bucket from query param or default to moodboards bucket
-        const bucketName = (bucket && typeof bucket === 'string') 
-          ? bucket 
+        const bucketName = (bucket && typeof bucket === 'string')
+          ? storageService.resolveBucketName(bucket)
           : config.s3BucketMoodboards;
-        
-        const command = new GetObjectCommand({
-          Bucket: bucketName,
-          Key: s3Key,
-        });
 
-        // Set timeout for S3 request (25 seconds - less than client timeout)
-        const s3Response = await Promise.race([
-          storageService.s3Client.send(command),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('S3 request timeout')), 25000)
+        const file = await Promise.race([
+          storageService.downloadFile(bucketName, s3Key),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Storage request timeout')), 25000)
           ),
-        ]) as any;
-        
-        if (!s3Response || !s3Response.Body) {
-          throw errors.badRequest('Failed to fetch image from S3');
-        }
+        ]);
 
-        // Set proper download headers
-        res.setHeader('Content-Type', s3Response.ContentType || 'image/png');
+        res.setHeader('Content-Type', file.contentType || 'image/png');
         res.setHeader('Content-Disposition', `attachment; filename="${filename || 'moodboard.png'}"`);
-        if (s3Response.ContentLength) {
-          res.setHeader('Content-Length', s3Response.ContentLength.toString());
-        }
-
-        // Stream directly from S3 to client
-        // For reliability, buffer the entire file first to avoid gateway timeouts
-        try {
-          const chunks: Uint8Array[] = [];
-          
-          // Handle both Readable streams and async iterables
-          if (s3Response.Body instanceof Readable) {
-            // Convert Readable stream to buffer
-            for await (const chunk of s3Response.Body) {
-              chunks.push(chunk);
-            }
-          } else {
-            // Handle async iterable
-            for await (const chunk of s3Response.Body as any) {
-              chunks.push(chunk);
-            }
-          }
-          
-          const buffer = Buffer.concat(chunks);
-          res.setHeader('Content-Length', buffer.length.toString());
-          res.send(buffer);
-          return;
-        } catch (streamError: any) {
-          logger.error({ s3Key, error: String(streamError) }, 'Failed to read S3 stream');
-          throw errors.badRequest('Failed to read image from S3');
-        }
-      } catch (s3Error: any) {
-        logger.warn({ s3Key, bucket, error: String(s3Error), message: s3Error?.message }, 'S3 direct access failed, falling back to URL fetch');
+        res.setHeader('Content-Length', file.data.length.toString());
+        res.send(file.data);
+        return;
+      } catch (storageError: unknown) {
+        logger.warn({ s3Key, bucket, error: String(storageError) }, 'Storage direct access failed, falling back to URL fetch');
         // Fall through to URL-based fetch
       }
     }

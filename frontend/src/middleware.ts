@@ -47,6 +47,14 @@ function isPublicPath(pathname: string): boolean {
   return false;
 }
 
+function allowXUserIdBypass(): boolean {
+  // NOTE: temporary integration escape hatch.
+  // Default ON unless explicitly disabled.
+  const raw = (process.env.NEXT_PUBLIC_ALLOW_X_USER_ID_BYPASS || '').trim().toLowerCase();
+  if (raw === '0' || raw === 'false' || raw === 'no') return false;
+  return true;
+}
+
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
@@ -58,6 +66,29 @@ export function middleware(req: NextRequest) {
   // PWA / TWA / static / webhooks — never require session cookies
   if (isPublicPath(pathname)) {
     return NextResponse.next();
+  }
+
+  // Temporary integration mode: allow session-less access when upstream provides x_user_id
+  // (e.g. another app deep-links into Vision and we forward x-user-id to the backend).
+  if (allowXUserIdBypass()) {
+    const urlUserId = req.nextUrl.searchParams.get('x_user_id')?.trim();
+    const cookieUserId = req.cookies.get('x_user_id')?.value?.trim();
+    const userId = urlUserId || cookieUserId || '';
+
+    if (userId) {
+      const res = NextResponse.next();
+      // Persist for subsequent navigations so user doesn't need query param everywhere.
+      if (urlUserId && urlUserId !== cookieUserId) {
+        res.cookies.set('x_user_id', urlUserId, {
+          httpOnly: false,
+          sameSite: 'lax',
+          secure: req.nextUrl.protocol === 'https:',
+          path: '/',
+          maxAge: 60 * 60 * 24 * 30, // 30 days
+        });
+      }
+      return res;
+    }
   }
 
   const token = req.cookies.get('tatvaops_token')?.value;

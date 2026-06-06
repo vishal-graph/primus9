@@ -18,6 +18,7 @@
     "@aws-sdk/s3-request-presigner": "^3.485.0",
     "@google/generative-ai": "^0.2.0",
     "@prisma/client": "^5.8.0",
+    "@supabase/supabase-js": "^2.107.0",
     "dotenv": "^17.2.3",
     "ioredis": "^5.3.2",
     "pdf-to-png-converter": "^3.11.0",

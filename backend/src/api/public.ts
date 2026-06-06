@@ -1,9 +1,15 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { Readable } from 'stream';
-import { GetObjectCommand } from '@aws-sdk/client-s3';
+import { z } from 'zod';
+import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../lib/logger';
 import { storageService } from '../services/storage';
 import { config } from '../config';
+import { prisma } from '../lib/prisma';
+import { errors } from '../lib/error-handler';
+import { generateUniqueSlug } from '../lib/slug';
+import { AIJobType } from '@prisma/client';
+import { aiJobQueue } from '../workers/queue';
+import { jobCache } from '../lib/redis-client';
 
 export const publicRouter = Router();
 
@@ -146,93 +152,54 @@ publicRouter.get('/download', async (req: Request, res: Response, _next: NextFun
       originalKey: s3Key, 
       bucket: bucketName, 
       objectKey 
-    }, 'Public download: Fetching from S3');
+    }, 'Public download: Fetching from storage');
         
     try {
-        const command = new GetObjectCommand({
-          Bucket: bucketName,
-        Key: objectKey,  // Use resolved objectKey, NOT original s3Key
-        });
-
-        // Set timeout for S3 request (25 seconds)
-        const s3Response = await Promise.race([
-          storageService.s3Client.send(command),
-        new Promise<never>((_, reject) => 
-          setTimeout(() => reject(new Error('S3 request timeout after 25s')), 25000)
+        const { data: fileBuffer, contentType } = await Promise.race([
+          storageService.downloadFile(bucketName, objectKey),
+          new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('Storage request timeout after 25s')), 25000)
           ),
-      ]);
-        
-        if (!s3Response || !s3Response.Body) {
-        logger.warn({ bucketName, objectKey }, 'Public download: Empty S3 response');
-        return res.status(404).json({
-          success: false,
-          error: 'File not found in storage',
-        });
-        }
+        ]);
 
-      // Set proper download headers with sanitized filename
-      res.setHeader('Content-Type', s3Response.ContentType || 'image/jpeg');
+      res.setHeader('Content-Type', contentType || 'image/jpeg');
       res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
-        
-        // Buffer the entire file for reliability
-          const chunks: Uint8Array[] = [];
-          
-          if (s3Response.Body instanceof Readable) {
-            for await (const chunk of s3Response.Body) {
-              chunks.push(chunk);
-            }
-          } else {
-        // Handle AWS SDK v3 stream types
-        for await (const chunk of s3Response.Body as AsyncIterable<Uint8Array>) {
-              chunks.push(chunk);
-            }
-          }
-          
-          const buffer = Buffer.concat(chunks);
-          res.setHeader('Content-Length', buffer.length.toString());
+      res.setHeader('Content-Length', fileBuffer.length.toString());
       
       logger.info({ 
         originalKey: s3Key, 
         objectKey, 
-        size: buffer.length 
+        size: fileBuffer.length 
       }, 'Public download: Success');
       
-      return res.send(buffer);
+      return res.send(fileBuffer);
 
-    } catch (s3Error: any) {
-      // Log detailed error for debugging
+    } catch (storageError: unknown) {
+      const err = storageError as { message?: string; name?: string; Code?: string };
       console.error('[DOWNLOAD ERROR]', {
         bucketName,
         objectKey,
         originalKey: s3Key,
-        message: s3Error.message,
-        code: s3Error.Code || s3Error.name,
+        message: err.message,
+        code: err.Code || err.name,
       });
 
       logger.error({ 
         bucketName, 
         objectKey,
         originalKey: s3Key,
-        error: s3Error.message,
-        code: s3Error.Code || s3Error.name,
-      }, 'Public download: S3 access failed');
+        error: err.message,
+        code: err.Code || err.name,
+      }, 'Public download: Storage access failed');
 
-      // Return appropriate error (never throw unhandled)
-      if (s3Error.Code === 'NoSuchKey' || s3Error.name === 'NoSuchKey') {
+      if (err.message?.includes('not found') || err.name === 'NoSuchKey') {
         return res.status(404).json({
           success: false,
           error: 'Asset not found in storage',
         });
-        }
-
-      if (s3Error.Code === 'AccessDenied' || s3Error.name === 'AccessDenied') {
-        return res.status(403).json({
-          success: false,
-          error: 'Access denied to storage',
-        });
       }
 
-      if (s3Error.message?.includes('timeout')) {
+      if (err.message?.includes('timeout')) {
         return res.status(504).json({
           success: false,
           error: 'Storage request timed out',
@@ -243,8 +210,8 @@ publicRouter.get('/download', async (req: Request, res: Response, _next: NextFun
         success: false,
         error: 'Failed to retrieve asset from storage',
       });
-      }
     }
+  }
 
   // ===========================================
   // URL Fallback (Secondary Method)
@@ -323,6 +290,348 @@ publicRouter.options('/download', (req: Request, res: Response) => {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  res.status(204).end();
+});
+
+// ===========================================
+// POST /api/public/uploads/presigned-url
+// ===========================================
+/**
+ * Public presigned upload URL endpoint (NO auth).
+ *
+ * Intended for apps that do auth externally and only need a presigned URL.
+ * Caller must provide userId (body.userId or x-user-id header) and projectId.
+ */
+const publicPresignedUploadSchema = z.object({
+  filename: z.string().min(1).max(255),
+  contentType: z.string().min(1),
+  bucket: z.enum(['floorplans', 'moodboards', 'renders', 'exports']),
+  projectId: z.string().uuid(),
+  userId: z.string().uuid().optional(),
+});
+
+publicRouter.post('/uploads/presigned-url', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const input = publicPresignedUploadSchema.parse(req.body);
+    const headerUserId = typeof req.headers['x-user-id'] === 'string' ? req.headers['x-user-id'] : undefined;
+    const userId = (input.userId || headerUserId || '').trim();
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing userId. Provide body.userId or x-user-id header.',
+      });
+    }
+
+    // Generate presigned URL (no ownership checks in public mode)
+    const { url, key } = await storageService.generateUploadUrl({
+      bucket: input.bucket,
+      filename: input.filename,
+      contentType: input.contentType,
+      userId,
+      projectId: input.projectId,
+    });
+
+    logger.info(
+      {
+        userId,
+        projectId: input.projectId,
+        bucket: input.bucket,
+        key,
+        public: true,
+      },
+      'Public upload URL generated'
+    );
+
+    return res.json({
+      success: true,
+      data: {
+        uploadUrl: url,
+        key,
+        bucket: input.bucket,
+        expiresIn: 3600,
+        instructions: {
+          method: 'PUT',
+          headers: { 'Content-Type': input.contentType },
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+publicRouter.options('/uploads/presigned-url', (req: Request, res: Response) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-user-id');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  res.status(204).end();
+});
+
+// ===========================================
+// Floor plan public flow (start -> upload -> confirm + trigger analysis)
+// ===========================================
+
+const floorplanStartSchema = z.object({
+  userId: z.string().uuid().optional(),
+  projectId: z.string().uuid().optional(),
+  projectName: z.string().min(1).max(100).optional(),
+  filename: z.string().min(1).max(255),
+  contentType: z.string().min(1),
+});
+
+/**
+ * POST /api/public/floorplans/start
+ *
+ * Creates (or reuses) a project and returns a presigned URL for floorplan upload.
+ * No auth middleware; caller must pass userId (body.userId or x-user-id header).
+ */
+publicRouter.post('/floorplans/start', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const input = floorplanStartSchema.parse(req.body);
+    const headerUserId = typeof req.headers['x-user-id'] === 'string' ? req.headers['x-user-id'] : undefined;
+    const userId = (input.userId || headerUserId || '').trim();
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing userId. Provide body.userId or x-user-id header.',
+      });
+    }
+
+    let projectId = input.projectId?.trim();
+    let slug: string | null = null;
+
+    if (projectId) {
+      const project = await prisma.project.findFirst({
+        where: { id: projectId, userId, deletedAt: null },
+        select: { id: true, slug: true },
+      });
+      if (!project) throw errors.notFound('Project');
+      slug = project.slug;
+    } else {
+      const name = input.projectName?.trim() || 'Untitled project';
+      slug = await generateUniqueSlug(name);
+      const project = await prisma.project.create({
+        data: {
+          name,
+          slug,
+          userId,
+          currentStage: 'FLOOR_PLAN',
+          planCode: null,
+          planSource: null,
+        },
+        select: { id: true, slug: true },
+      });
+      projectId = project.id;
+      slug = project.slug;
+    }
+
+    const { url, key } = await storageService.generateUploadUrl({
+      bucket: 'floorplans',
+      filename: input.filename,
+      contentType: input.contentType,
+      userId,
+      projectId,
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        projectId,
+        slug,
+        uploadUrl: url,
+        key,
+        bucket: 'floorplans',
+        expiresIn: 3600,
+        instructions: {
+          method: 'PUT',
+          headers: { 'Content-Type': input.contentType },
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+const floorplanConfirmSchema = z.object({
+  userId: z.string().uuid().optional(),
+  projectId: z.string().uuid(),
+  key: z.string().min(1),
+  contentType: z.string().min(1),
+  fileSize: z.number().int().positive().optional(),
+  planType: z.enum(['residential', 'commercial']).optional(),
+});
+
+async function enqueuePublicFloorplanAnalysis(args: {
+  userId: string;
+  projectId: string;
+  imageUrl: string;
+  mimeType: string;
+  planType?: 'residential' | 'commercial';
+}): Promise<string> {
+  const jobId = uuidv4();
+
+  await prisma.aIJob.create({
+    data: {
+      id: jobId,
+      userId: args.userId,
+      projectId: args.projectId,
+      type: 'FLOORPLAN_ANALYSIS',
+      status: 'QUEUED',
+      payload: {
+        projectId: args.projectId,
+        imageUrl: args.imageUrl,
+        mimeType: args.mimeType,
+        hints: { planType: args.planType ?? 'residential' },
+      },
+    },
+  });
+
+  await aiJobQueue.add(
+    AIJobType.FLOORPLAN_ANALYSIS,
+    {
+      userId: args.userId,
+      jobId,
+      projectId: args.projectId,
+      imageUrl: args.imageUrl,
+      mimeType: args.mimeType,
+      hints: { planType: args.planType ?? 'residential' },
+    },
+    {
+      jobId,
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 2000 },
+      removeOnComplete: { count: 1000, age: 24 * 60 * 60 },
+      removeOnFail: { count: 500, age: 7 * 24 * 60 * 60 },
+    }
+  );
+
+  await jobCache.setStatus(jobId, { status: 'QUEUED', progress: 0 });
+  return jobId;
+}
+
+/**
+ * POST /api/public/floorplans/confirm
+ *
+ * Confirms that the client uploaded the floorplan to S3, registers it as FLOORPLAN_ORIGINAL
+ * (same DB + storage model as the authenticated flow), updates project.floorPlanUrl,
+ * and kicks off FLOORPLAN_ANALYSIS job in the same BullMQ pipeline.
+ */
+publicRouter.post('/floorplans/confirm', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const input = floorplanConfirmSchema.parse(req.body);
+    const headerUserId = typeof req.headers['x-user-id'] === 'string' ? req.headers['x-user-id'] : undefined;
+    const userId = (input.userId || headerUserId || '').trim();
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing userId. Provide body.userId or x-user-id header.',
+      });
+    }
+
+    const project = await prisma.project.findFirst({
+      where: { id: input.projectId, userId, deletedAt: null },
+      select: { id: true, slug: true },
+    });
+    if (!project) throw errors.notFound('Project');
+
+    const bucketName = config.s3BucketFloorplans;
+    const imageUrl = storageService.getPublicUrl('floorplans', input.key);
+
+    // Create asset version record similar to /api/uploads/confirm
+    const latestVersion = await prisma.assetVersion.findFirst({
+      where: {
+        projectId: input.projectId,
+        roomId: null,
+        assetType: 'FLOORPLAN_ORIGINAL',
+      },
+      orderBy: { version: 'desc' },
+    });
+
+    const nextVersion = (latestVersion?.version || 0) + 1;
+
+    if (latestVersion) {
+      await prisma.assetVersion.updateMany({
+        where: {
+          projectId: input.projectId,
+          roomId: null,
+          assetType: 'FLOORPLAN_ORIGINAL',
+          isLatest: true,
+        },
+        data: { isLatest: false },
+      });
+    }
+
+    const assetVersion = await prisma.assetVersion.create({
+      data: {
+        projectId: input.projectId,
+        roomId: null,
+        assetType: 'FLOORPLAN_ORIGINAL',
+        version: nextVersion,
+        s3Bucket: bucketName,
+        s3Key: input.key,
+        contentType: input.contentType,
+        fileSize: input.fileSize,
+        metadata: { publicUpload: true },
+        isLatest: true,
+        createdBy: userId,
+      },
+    });
+
+    await prisma.project.update({
+      where: { id: input.projectId },
+      data: { floorPlanUrl: imageUrl },
+    });
+
+    const jobId = await enqueuePublicFloorplanAnalysis({
+      userId,
+      projectId: input.projectId,
+      imageUrl,
+      mimeType: input.contentType,
+      planType: input.planType,
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        projectId: input.projectId,
+        slug: project.slug,
+        assetVersionId: assetVersion.id,
+        key: input.key,
+        imageUrl,
+        jobId,
+        nextPath: `/project/${project.slug || input.projectId}/floor-plan`,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+publicRouter.options('/floorplans/start', (req: Request, res: Response) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-user-id');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  res.status(204).end();
+});
+
+publicRouter.options('/floorplans/confirm', (req: Request, res: Response) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-user-id');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
   res.status(204).end();

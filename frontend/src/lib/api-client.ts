@@ -46,12 +46,11 @@ export async function serverFetch<T>(
 
   // Get auth token from cookie
   const authHeaders = await getServerAuthHeaders();
-  const token = authHeaders?.Authorization?.replace('Bearer ', '') ?? null;
 
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     ...fetchOptions.headers,
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(authHeaders ? authHeaders : {}),
   };
 
   let lastError: Error | null = null;
@@ -136,6 +135,20 @@ export function createClientFetch(token: string | null) {
       ...fetchOptions.headers,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     };
+
+    // Temporary integration mode: if no token, forward x_user_id cookie as x-user-id.
+    if (!token && typeof document !== 'undefined') {
+      const bypass = (process.env.NEXT_PUBLIC_ALLOW_X_USER_ID_BYPASS || '').trim().toLowerCase();
+      const allowBypass =
+        bypass === '1' || bypass === 'true' || bypass === 'yes' || process.env.NODE_ENV === 'development';
+      if (allowBypass) {
+        const m = document.cookie.match(/(?:^|;\s*)x_user_id=([^;]+)/);
+        const xUserId = m ? decodeURIComponent(m[1]) : null;
+        if (xUserId) {
+          (headers as Record<string, string>)['x-user-id'] = xUserId;
+        }
+      }
+    }
 
     let lastError: Error | null = null;
 

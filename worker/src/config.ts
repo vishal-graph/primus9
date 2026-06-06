@@ -26,16 +26,20 @@ const configSchema = z.object({
   redisUrl: z.string().default('redis://localhost:6379'),
   redisEnabled: z.coerce.boolean().default(true),
 
-  // AWS General
-  awsAccessKeyId: z.string(),
-  awsSecretAccessKey: z.string(),
+  // Supabase Storage
+  supabaseUrl: z.string().url(),
+  supabaseServiceRoleKey: z.string().min(1),
+
+  // AWS (optional — CloudWatch/SQS only)
+  awsAccessKeyId: z.string().optional().default('unused'),
+  awsSecretAccessKey: z.string().optional().default('unused'),
   awsRegion: z.string().default('ap-south-1'),
 
-  // AWS S3
-  s3BucketFloorplans: z.string(),
-  s3BucketMoodboards: z.string(),
-  s3BucketRenders: z.string(),
-  s3BucketExports: z.string(),
+  // Storage bucket names (Supabase Storage)
+  s3BucketFloorplans: z.string().default('floorplans'),
+  s3BucketMoodboards: z.string().default('moodboards'),
+  s3BucketRenders: z.string().default('renders'),
+  s3BucketExports: z.string().default('exports'),
 
   // AWS SQS Queues (Deprecated - Now using BullMQ)
   sqsQueueFloorplanAnalysis: z.string().optional(),
@@ -99,12 +103,26 @@ function normalizeRedisUrl(url: string): string {
   return trimmed;
 }
 
+function deriveSupabaseUrlFromDatabaseUrl(databaseUrl: string): string | undefined {
+  const match = databaseUrl.match(/postgres\.([a-z0-9]+)/i);
+  if (match?.[1]) return `https://${match[1]}.supabase.co`;
+  return undefined;
+}
+
 function loadConfig(): Config {
   try {
+    const databaseUrl = process.env.DATABASE_URL || '';
+    const supabaseUrl =
+      process.env.SUPABASE_URL?.trim() ||
+      deriveSupabaseUrlFromDatabaseUrl(databaseUrl) ||
+      '';
+
     const parsed = configSchema.parse({
       serviceName: process.env.SERVICE_NAME,
       nodeEnv: process.env.NODE_ENV,
-      databaseUrl: process.env.DATABASE_URL,
+      databaseUrl,
+      supabaseUrl,
+      supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
       productCatalogDatabaseUrl: process.env.PRODUCT_CATALOG_DATABASE_URL,
       strictCatalogSofaTiles: process.env.STRICT_CATALOG_SOFA_TILES,
       redisUrl: process.env.REDIS_URL,

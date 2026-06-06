@@ -45,9 +45,13 @@ const configSchema = z.object({
   clerkPublishableKey: z.string().optional(), // For token verification
   clerkWebhookSecret: z.string().optional(),
 
-  // AWS
-  awsAccessKeyId: z.string(),
-  awsSecretAccessKey: z.string(),
+  // Supabase Storage (replaces AWS S3 for file assets)
+  supabaseUrl: z.string().url(),
+  supabaseServiceRoleKey: z.string().min(1),
+
+  // AWS (optional — only needed for CloudWatch/SQS if used)
+  awsAccessKeyId: z.string().optional().default('unused'),
+  awsSecretAccessKey: z.string().optional().default('unused'),
   awsRegion: z.string().default('ap-south-1'),
 
   // CloudWatch Logs (optional; when unset, CloudWatch logger is disabled)
@@ -71,11 +75,11 @@ const configSchema = z.object({
   sqsDlqPdfExport: z.string().optional(),
   sqsDlqSenseInference: z.string().optional(),
 
-  // AWS S3 Buckets
-  s3BucketFloorplans: z.string(),
-  s3BucketMoodboards: z.string(),
-  s3BucketRenders: z.string(),
-  s3BucketExports: z.string(),
+  // Storage bucket names (Supabase Storage — create these in Supabase dashboard)
+  s3BucketFloorplans: z.string().default('floorplans'),
+  s3BucketMoodboards: z.string().default('moodboards'),
+  s3BucketRenders: z.string().default('renders'),
+  s3BucketExports: z.string().default('exports'),
   s3SignedUrlExpiry: z.coerce.number().default(3600), // 1 hour
 
   // Resend Email
@@ -127,6 +131,15 @@ type Config = z.infer<typeof configSchema>;
  * Cloud Redis often requires TLS. Plain `redis://` to Upstash (etc.) is reset by the server → ECONNRESET.
  * Auto-upgrade to `rediss://` when the host is a known TLS-only endpoint.
  */
+/** e.g. postgres.dcxbzjtgitqxbbcnxzwh@... → https://dcxbzjtgitqxbbcnxzwh.supabase.co */
+function deriveSupabaseUrlFromDatabaseUrl(databaseUrl: string): string | undefined {
+  const match = databaseUrl.match(/postgres\.([a-z0-9]+)/i);
+  if (match?.[1]) {
+    return `https://${match[1]}.supabase.co`;
+  }
+  return undefined;
+}
+
 function normalizeRedisUrl(url: string): string {
   const trimmed = url.trim();
   if (!trimmed.toLowerCase().startsWith('redis://')) {
@@ -169,6 +182,12 @@ function loadConfig(): Config {
       process.env.CLERK_SECRET_KEY = isQueueWorkerProcess ? 'worker-no-clerk' : 'dev-no-clerk';
     }
 
+    const databaseUrl = process.env.DATABASE_URL || '';
+    const supabaseUrl =
+      process.env.SUPABASE_URL?.trim() ||
+      deriveSupabaseUrlFromDatabaseUrl(databaseUrl) ||
+      '';
+
     const parsed = configSchema.parse({
       // Server
       port: process.env.PORT,
@@ -178,7 +197,9 @@ function loadConfig(): Config {
       jwtSecret: process.env.JWT_SECRET,
 
       // Database
-      databaseUrl: process.env.DATABASE_URL,
+      databaseUrl,
+      supabaseUrl,
+      supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
       productCatalogDatabaseUrl:
         process.env.PRODUCT_CATALOG_DATABASE_URL?.trim() || undefined,
 

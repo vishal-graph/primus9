@@ -1,35 +1,51 @@
 /**
- * TatvaOps Vision - S3 Utilities
- * 
- * S3 operations for the worker service.
+ * TatvaOps Vision - Object Storage Utilities (Supabase Storage)
  */
 
-import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-  PutObjectCommandInput,
-} from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { logger } from './logger';
 
-// ===========================================
-// S3 Client
-// ===========================================
+let supabaseClient: SupabaseClient | null = null;
 
-const s3Client = new S3Client({
-  region: process.env.AWS_REGION || 'ap-south-1',
-  credentials: process.env.AWS_ACCESS_KEY_ID
-    ? {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
-      }
-    : undefined, // Use IAM role if no credentials provided
-});
+function getSupabase(): SupabaseClient {
+  if (supabaseClient) return supabaseClient;
 
-// ===========================================
-// Upload Functions
-// ===========================================
+  const url =
+    process.env.SUPABASE_URL?.trim() ||
+    (() => {
+      const db = process.env.DATABASE_URL || '';
+      const match = db.match(/postgres\.([a-z0-9]+)/i);
+      return match?.[1] ? `https://${match[1]}.supabase.co` : '';
+    })();
+
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for storage');
+  }
+
+  supabaseClient = createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  return supabaseClient;
+}
+
+function resolveBucketName(name: string): string {
+  const floorplans = process.env.S3_BUCKET_FLOORPLANS || 'floorplans';
+  const moodboards = process.env.S3_BUCKET_MOODBOARDS || 'moodboards';
+  const renders = process.env.S3_BUCKET_RENDERS || 'renders';
+  const exportsBucket = process.env.S3_BUCKET_EXPORTS || 'exports';
+  const known = [floorplans, moodboards, renders, exportsBucket];
+  if (known.includes(name)) return name;
+
+  const lower = name.toLowerCase();
+  if (lower.includes('floorplan')) return floorplans;
+  if (lower.includes('moodboard')) return moodboards;
+  if (lower.includes('export')) return exportsBucket;
+  if (lower.includes('render') || lower.includes('elevation') || lower.includes('isometric')) {
+    return renders;
+  }
+  return name;
+}
 
 interface UploadOptions {
   bucket: string;
@@ -39,122 +55,84 @@ interface UploadOptions {
   metadata?: Record<string, string>;
 }
 
-/**
- * Upload a file to S3.
- */
+/** Upload a file to Supabase Storage. */
 export async function uploadToS3(options: UploadOptions): Promise<void> {
-  const { bucket, key, body, contentType, metadata } = options;
-
-  const params: PutObjectCommandInput = {
-    Bucket: bucket,
-    Key: key,
-    Body: body,
-    ContentType: contentType,
-    Metadata: metadata,
-  };
+  const { bucket, key, body, contentType } = options;
+  const bucketName = resolveBucketName(bucket);
+  const bodyBuffer = typeof body === 'string' ? Buffer.from(body) : body;
 
   try {
-    await s3Client.send(new PutObjectCommand(params));
-    logger.debug('S3 upload successful', { bucket, key });
+    const { error } = await getSupabase()
+      .storage
+      .from(bucketName)
+      .upload(key, bodyBuffer, { contentType, upsert: true });
+
+    if (error) throw error;
+    logger.debug('Storage upload successful', { bucket: bucketName, key });
   } catch (error) {
-    logger.error('S3 upload failed', { bucket, key, error: String(error) });
-    throw new Error(`Failed to upload to S3: ${error}`);
+    logger.error('Storage upload failed', { bucket: bucketName, key, error: String(error) });
+    throw new Error(`Failed to upload to storage: ${error}`);
   }
 }
 
-// ===========================================
-// Download Functions
-// ===========================================
-
-/**
- * Download a file from S3.
- */
+/** Download a file from Supabase Storage. */
 export async function downloadFromS3(
   bucket: string,
   key: string
 ): Promise<{ data: Buffer; contentType: string | undefined }> {
+  const bucketName = resolveBucketName(bucket);
+
   try {
-    const response = await s3Client.send(
-      new GetObjectCommand({
-        Bucket: bucket,
-        Key: key,
-      })
-    );
+    const { data, error } = await getSupabase().storage.from(bucketName).download(key);
+    if (error || !data) throw error || new Error('Empty response');
 
-    const bodyStream = response.Body;
-    if (!bodyStream) {
-      throw new Error('Empty response body from S3');
-    }
-
-    // Convert stream to buffer
-    const chunks: Buffer[] = [];
-    for await (const chunk of bodyStream as AsyncIterable<Buffer>) {
-      chunks.push(chunk);
-    }
-
+    const arrayBuffer = await data.arrayBuffer();
     return {
-      data: Buffer.concat(chunks),
-      contentType: response.ContentType,
+      data: Buffer.from(arrayBuffer),
+      contentType: data.type || undefined,
     };
   } catch (error) {
-    logger.error('S3 download failed', { bucket, key, error: String(error) });
-    throw new Error(`Failed to download from S3: ${error}`);
+    logger.error('Storage download failed', { bucket: bucketName, key, error: String(error) });
+    throw new Error(`Failed to download from storage: ${error}`);
   }
 }
 
-// ===========================================
-// Signed URLs
-// ===========================================
-
-/**
- * Generate a signed URL for reading an S3 object.
- */
+/** Generate a signed URL for reading an object. */
 export async function generateSignedUrl(
   bucket: string,
   key: string,
   expiresIn: number = 3600
 ): Promise<string> {
-  try {
-    const command = new GetObjectCommand({
-      Bucket: bucket,
-      Key: key,
-    });
+  const bucketName = resolveBucketName(bucket);
 
-    return await getSignedUrl(s3Client, command, { expiresIn });
+  try {
+    const { data, error } = await getSupabase()
+      .storage
+      .from(bucketName)
+      .createSignedUrl(key, expiresIn);
+
+    if (error || !data?.signedUrl) throw error || new Error('No signed URL');
+    return data.signedUrl;
   } catch (error) {
-    logger.error('Failed to generate signed URL', {
-      bucket,
-      key,
-      error: String(error),
-    });
+    logger.error('Failed to generate signed URL', { bucket: bucketName, key, error: String(error) });
     throw new Error(`Failed to generate signed URL: ${error}`);
   }
 }
 
-// ===========================================
-// URL Helpers
-// ===========================================
-
-/**
- * Check if a string is an S3 URL.
- */
+/** s3://bucket/key — kept for DB compatibility. */
 export function isS3Url(url: string): boolean {
   return url.startsWith('s3://');
 }
 
-/**
- * Parse an S3 URL into bucket and key.
- */
 export function parseS3Url(url: string): { bucket: string; key: string } {
   if (!isS3Url(url)) {
-    throw new Error(`Invalid S3 URL: ${url}`);
+    throw new Error(`Invalid storage URL: ${url}`);
   }
 
-  const withoutProtocol = url.slice(5); // Remove 's3://'
+  const withoutProtocol = url.slice(5);
   const slashIndex = withoutProtocol.indexOf('/');
-
   if (slashIndex === -1) {
-    throw new Error(`Invalid S3 URL (no key): ${url}`);
+    throw new Error(`Invalid storage URL (no key): ${url}`);
   }
 
   return {
@@ -163,10 +141,20 @@ export function parseS3Url(url: string): { bucket: string; key: string } {
   };
 }
 
-/**
- * Build an S3 URL from bucket and key.
- */
 export function buildS3Url(bucket: string, key: string): string {
   return `s3://${bucket}/${key}`;
 }
 
+/** Public object URL when bucket is public in Supabase. */
+export function getPublicStorageUrl(bucket: string, key: string): string {
+  const url =
+    process.env.SUPABASE_URL?.trim() ||
+    (() => {
+      const db = process.env.DATABASE_URL || '';
+      const match = db.match(/postgres\.([a-z0-9]+)/i);
+      return match?.[1] ? `https://${match[1]}.supabase.co` : '';
+    })();
+  const bucketName = resolveBucketName(bucket);
+  const encodedKey = key.split('/').map(encodeURIComponent).join('/');
+  return `${url}/storage/v1/object/public/${bucketName}/${encodedKey}`;
+}
