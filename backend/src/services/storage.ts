@@ -1,6 +1,7 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { SupabaseClient } from '@supabase/supabase-js';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config';
+import { createStorageSupabaseClient } from '../lib/supabase-storage-client';
 
 /**
  * Storage Service — Supabase Storage
@@ -22,9 +23,7 @@ export class StorageService {
   private bucketMap: Record<BucketType, string>;
 
   constructor() {
-    this.supabase = createClient(config.supabaseUrl, config.supabaseServiceRoleKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    this.supabase = createStorageSupabaseClient(config.supabaseUrl, config.supabaseServiceRoleKey);
 
     this.bucketMap = {
       floorplans: config.s3BucketFloorplans,

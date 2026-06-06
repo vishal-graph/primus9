@@ -2,8 +2,9 @@
  * TatvaOps Vision - Object Storage Utilities (Supabase Storage)
  */
 
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from './logger';
+import { createStorageSupabaseClient } from './supabase-storage-client';
 
 let supabaseClient: SupabaseClient | null = null;
 
@@ -23,9 +24,7 @@ function getSupabase(): SupabaseClient {
     throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for storage');
   }
 
-  supabaseClient = createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  supabaseClient = createStorageSupabaseClient(url, key);
   return supabaseClient;
 }
 
