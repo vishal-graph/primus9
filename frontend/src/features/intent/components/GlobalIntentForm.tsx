@@ -117,7 +117,7 @@ function FormSection({
       sx={{
         p: 3,
         mb: 3,
-        border: 1,''
+        border: 1,
         borderColor: 'divider',
         borderRadius: 2,
       }}
