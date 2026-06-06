@@ -15,7 +15,7 @@
 
 'use server';
 
-import { getServerAuthHeaders } from '@/lib/server-auth';
+import { getServerAuthHeaders, asFetchHeaders } from '@/lib/server-auth';
 import { getApiBase } from '@/lib/api-base';
 
 // ============================================
@@ -89,9 +89,7 @@ export async function getProjectElevations(
     }
 
     const response = await fetch(`${getApiBase()}/api/projects/${projectId}/elevations`, {
-      headers: {
-        'Authorization': authHeaders!.Authorization,
-      },
+      headers: asFetchHeaders(authHeaders),
     });
 
     if (!response.ok) {
@@ -126,9 +124,7 @@ export async function getRoomElevations(
     const response = await fetch(
       `${getApiBase()}/api/projects/${projectId}/rooms/${roomId}/elevations`,
       {
-        headers: {
-          'Authorization': authHeaders!.Authorization,
-        },
+        headers: asFetchHeaders(authHeaders),
       }
     );
 
@@ -170,7 +166,7 @@ export async function triggerRoomElevationGeneration(
     const response = await fetch(`${getApiBase()}/api/jobs`, {
       method: 'POST',
       headers: {
-        'Authorization': authHeaders!.Authorization,
+        ...asFetchHeaders(authHeaders),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -229,7 +225,7 @@ export async function triggerAllRoomElevations(
       const response = await fetch(`${getApiBase()}/api/jobs`, {
         method: 'POST',
         headers: {
-          'Authorization': authHeaders!.Authorization,
+          ...asFetchHeaders(authHeaders),
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -289,9 +285,7 @@ export async function getElevationJobStatus(
     }
 
     const response = await fetch(`${getApiBase()}/api/jobs/${jobId}`, {
-      headers: {
-        'Authorization': authHeaders!.Authorization,
-      },
+      headers: asFetchHeaders(authHeaders),
     });
 
     if (!response.ok) {
@@ -326,9 +320,7 @@ export async function getActiveElevationJobs(
     const response = await fetch(
       `${getApiBase()}/api/jobs?projectId=${projectId}&type=ELEVATION&status=QUEUED,PROCESSING`,
       {
-        headers: {
-          'Authorization': authHeaders!.Authorization,
-        },
+        headers: asFetchHeaders(authHeaders),
       }
     );
 
@@ -378,9 +370,7 @@ export async function getIsometricElevation(
     const response = await fetch(
       `${getApiBase()}/api/projects/${projectId}/isometric/latest?floor=${floor}`,
       {
-        headers: {
-          'Authorization': authHeaders!.Authorization,
-        },
+        headers: asFetchHeaders(authHeaders),
       }
     );
 
@@ -415,9 +405,7 @@ export async function getAllIsometricElevations(
     const response = await fetch(
       `${getApiBase()}/api/projects/${projectId}/isometric`,
       {
-        headers: {
-          'Authorization': authHeaders!.Authorization,
-        },
+        headers: asFetchHeaders(authHeaders),
       }
     );
 
@@ -457,7 +445,7 @@ export async function triggerIsometricGeneration(
     const response = await fetch(`${getApiBase()}/api/jobs`, {
       method: 'POST',
       headers: {
-        'Authorization': authHeaders!.Authorization,
+        ...asFetchHeaders(authHeaders),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -502,9 +490,7 @@ export async function cancelIsometricJob(
 
     const response = await fetch(`${getApiBase()}/api/jobs/${jobId}/cancel`, {
       method: 'POST',
-      headers: {
-        'Authorization': authHeaders!.Authorization,
-      },
+      headers: asFetchHeaders(authHeaders),
     });
 
     if (!response.ok) {
@@ -538,9 +524,7 @@ export async function getActiveIsometricJobs(
     const response = await fetch(
       `${getApiBase()}/api/jobs?projectId=${projectId}&type=INTERIOR_ISOMETRIC&status=QUEUED,PROCESSING`,
       {
-        headers: {
-          'Authorization': authHeaders!.Authorization,
-        },
+        headers: asFetchHeaders(authHeaders),
       }
     );
 

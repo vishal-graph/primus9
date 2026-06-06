@@ -6,7 +6,7 @@
 
 'use server';
 
-import { getServerAuthHeaders } from '@/lib/server-auth';
+import { getServerAuthHeaders, asFetchHeaders } from '@/lib/server-auth';
 import { getApiBase } from '@/lib/api-base';
 
 // ============================================
@@ -73,7 +73,7 @@ export async function createMoodboardPdfExport(
     const response = await fetch(`${getApiBase()}/api/exports/moodboard-pdf`, {
       method: 'POST',
       headers: {
-        'Authorization': authHeaders!.Authorization,
+        ...asFetchHeaders(authHeaders),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -120,9 +120,7 @@ export async function getExportStatus(
     }
 
     const response = await fetch(`${getApiBase()}/api/exports/${exportId}`, {
-      headers: {
-        'Authorization': authHeaders!.Authorization,
-      },
+      headers: asFetchHeaders(authHeaders),
     });
 
     if (!response.ok) {
@@ -165,9 +163,7 @@ export async function getLatestExport(
     const response = await fetch(
       `${getApiBase()}/api/exports/project/${projectId}/latest?type=${type}`,
       {
-        headers: {
-          'Authorization': authHeaders!.Authorization,
-        },
+        headers: asFetchHeaders(authHeaders),
       }
     );
 
@@ -207,9 +203,7 @@ export async function getProjectExports(
     const response = await fetch(
       `${getApiBase()}/api/exports/project/${projectId}`,
       {
-        headers: {
-          'Authorization': authHeaders!.Authorization,
-        },
+        headers: asFetchHeaders(authHeaders),
       }
     );
 

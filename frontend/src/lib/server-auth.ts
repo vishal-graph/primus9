@@ -9,11 +9,10 @@
 
 import { cookies } from 'next/headers';
 
-interface ServerAuthHeaders {
+export type ServerAuthHeaders = {
   Authorization?: string;
   'x-user-id'?: string;
-  [key: string]: string;
-}
+};
 
 /**
  * Returns auth headers (Bearer token when present, else x-user-id when bypass cookie is set),
@@ -45,4 +44,13 @@ export async function requireServerAuth(): Promise<ServerAuthHeaders> {
     throw new Error('Not authenticated');
   }
   return headers;
+}
+
+/** Build fetch-compatible headers (no undefined values). */
+export function asFetchHeaders(headers: ServerAuthHeaders): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (value !== undefined) out[key] = value;
+  }
+  return out;
 }

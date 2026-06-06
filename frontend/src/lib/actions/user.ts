@@ -5,7 +5,7 @@
  * Handles profile retrieval, updates, and onboarding
  */
 
-import { getServerAuthHeaders } from '@/lib/server-auth';
+import { getServerAuthHeaders, asFetchHeaders } from '@/lib/server-auth';
 import { getApiBase } from '@/lib/api-base';
 
 export interface UserProfile {
@@ -32,9 +32,7 @@ export async function getUserProfile(): Promise<{ success: boolean; data?: UserP
     }
 
     const response = await fetch(`${getApiBase()}/api/user/profile`, {
-      headers: {
-        'Authorization': authHeaders!.Authorization,
-      },
+      headers: asFetchHeaders(authHeaders),
       cache: 'no-store',
     });
 
@@ -72,7 +70,7 @@ export async function updateUserProfile(profileData: Partial<UserProfile>): Prom
     const response = await fetch(`${getApiBase()}/api/user/profile`, {
       method: 'PATCH',
       headers: {
-        'Authorization': authHeaders!.Authorization,
+        ...asFetchHeaders(authHeaders),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(profileData),
@@ -111,7 +109,7 @@ export async function completeOnboarding(data: OnboardingData): Promise<{ succes
     const response = await fetch(`${getApiBase()}/api/user/onboarding`, {
       method: 'POST',
       headers: {
-        'Authorization': authHeaders!.Authorization,
+        ...asFetchHeaders(authHeaders),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(data),

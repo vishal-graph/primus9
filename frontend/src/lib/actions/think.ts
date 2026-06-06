@@ -10,7 +10,7 @@
  * 4. Poll spatial planning job status
  */
 
-import { getServerAuthHeaders } from '@/lib/server-auth';
+import { getServerAuthHeaders, asFetchHeaders } from '@/lib/server-auth';
 import { getApiBase } from '@/lib/api-base';
 
 // ============================================
@@ -127,7 +127,7 @@ export async function createSpatialPlan(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': authHeaders!.Authorization,
+        ...asFetchHeaders(authHeaders),
       },
       body: JSON.stringify({
         projectId,
@@ -190,9 +190,7 @@ export async function getSpatialPlan(
 
     const response = await fetch(`${getApiBase()}/api/think/${projectId}`, {
       method: 'GET',
-      headers: {
-        'Authorization': authHeaders!.Authorization,
-      },
+      headers: asFetchHeaders(authHeaders),
       cache: 'no-store',
     });
 
@@ -246,9 +244,7 @@ export async function deleteSpatialPlan(
 
     const response = await fetch(`${getApiBase()}/api/think/${projectId}`, {
       method: 'DELETE',
-      headers: {
-        'Authorization': authHeaders!.Authorization,
-      },
+      headers: asFetchHeaders(authHeaders),
     });
 
     if (!response.ok) {
@@ -303,9 +299,7 @@ export async function getSpatialPlanningJobStatus(
 
     const response = await fetch(`${getApiBase()}/api/jobs/${jobId}`, {
       method: 'GET',
-      headers: {
-        'Authorization': authHeaders!.Authorization,
-      },
+      headers: asFetchHeaders(authHeaders),
       cache: 'no-store',
     });
 

@@ -10,7 +10,7 @@
  * 4. Fetch analysis results
  */
 
-import { getServerAuthHeaders } from '@/lib/server-auth';
+import { getServerAuthHeaders, asFetchHeaders } from '@/lib/server-auth';
 import { getApiBase } from '@/lib/api-base';
 
 // ============================================
@@ -98,9 +98,7 @@ export async function uploadFloorPlan(
       
       // Check if user is internal and needs to select a plan
       const userResponse = await fetch(`${getApiBase()}/api/user/me`, {
-        headers: {
-          'Authorization': authHeaders!.Authorization,
-        },
+        headers: asFetchHeaders(authHeaders),
       });
       
       if (!userResponse.ok) {
@@ -125,9 +123,9 @@ export async function uploadFloorPlan(
       const createResponse = await fetch(`${getApiBase()}/api/projects`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': authHeaders!.Authorization,
-        },
+        'Content-Type': 'application/json',
+        ...asFetchHeaders(authHeaders),
+      },
         body: JSON.stringify(projectPayload),
       });
 
@@ -148,7 +146,7 @@ export async function uploadFloorPlan(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': authHeaders!.Authorization,
+        ...asFetchHeaders(authHeaders),
       },
       body: JSON.stringify({
         filename: file.name,
@@ -189,7 +187,7 @@ export async function uploadFloorPlan(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': authHeaders!.Authorization,
+        ...asFetchHeaders(authHeaders),
       },
       body: JSON.stringify({
         key,
@@ -234,7 +232,7 @@ export async function triggerFloorPlanAnalysis(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': authHeaders!.Authorization,
+        ...asFetchHeaders(authHeaders),
       },
       body: JSON.stringify({
         type: 'FLOORPLAN_ANALYSIS',
@@ -277,9 +275,7 @@ export async function getJobStatus(jobId: string): Promise<AnalysisResult & { ne
     }
 
     const response = await fetch(`${getApiBase()}/api/jobs/${jobId}`, {
-      headers: {
-        'Authorization': authHeaders!.Authorization,
-      },
+      headers: asFetchHeaders(authHeaders),
     });
 
     if (!response.ok) {
@@ -369,9 +365,7 @@ export async function getProjectData(projectId: string): Promise<{
 
     // Fetch project with rooms
     const projectResponse = await fetch(`${getApiBase()}/api/projects/${projectId}`, {
-      headers: {
-        'Authorization': authHeaders!.Authorization,
-      },
+      headers: asFetchHeaders(authHeaders),
     });
 
     if (!projectResponse.ok) {
@@ -385,9 +379,7 @@ export async function getProjectData(projectId: string): Promise<{
     const analyzedAssetsResponse = await fetch(
       `${getApiBase()}/api/uploads/assets/${projectId}?assetType=FLOORPLAN_ANALYZED&latestOnly=true`,
       {
-        headers: {
-          'Authorization': authHeaders!.Authorization,
-        },
+        headers: asFetchHeaders(authHeaders),
       }
     );
 
@@ -405,9 +397,7 @@ export async function getProjectData(projectId: string): Promise<{
       const assetsResponse = await fetch(
         `${getApiBase()}/api/uploads/assets/${projectId}?assetType=FLOORPLAN_ORIGINAL&latestOnly=true`,
         {
-          headers: {
-            'Authorization': authHeaders!.Authorization,
-          },
+          headers: asFetchHeaders(authHeaders),
         }
       );
 
@@ -495,7 +485,7 @@ export async function updateRoom(
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': authHeaders!.Authorization,
+        ...asFetchHeaders(authHeaders),
       },
       body: JSON.stringify(updates),
     });
@@ -528,9 +518,7 @@ export async function deleteRoom(
 
     const response = await fetch(`${getApiBase()}/api/projects/${projectId}/rooms/${roomId}`, {
       method: 'DELETE',
-      headers: {
-        'Authorization': authHeaders!.Authorization,
-      },
+      headers: asFetchHeaders(authHeaders),
     });
 
     if (!response.ok) {

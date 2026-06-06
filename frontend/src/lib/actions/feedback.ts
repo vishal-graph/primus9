@@ -1,6 +1,6 @@
 'use server';
 
-import { getServerAuthHeaders } from '@/lib/server-auth';
+import { getServerAuthHeaders, asFetchHeaders } from '@/lib/server-auth';
 import { getApiBase } from '@/lib/api-base';
 
 export interface SubmitFeedbackInput {
@@ -32,9 +32,7 @@ export async function checkFeedbackExists(
     }
 
     const response = await fetch(`${getApiBase()}/api/feedback/${projectId}`, {
-      headers: {
-        'Authorization': authHeaders!.Authorization,
-      },
+      headers: asFetchHeaders(authHeaders),
     });
 
     if (!response.ok) {
@@ -63,7 +61,7 @@ export async function submitFeedback(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': authHeaders!.Authorization,
+        ...asFetchHeaders(authHeaders),
       },
       body: JSON.stringify(input),
     });

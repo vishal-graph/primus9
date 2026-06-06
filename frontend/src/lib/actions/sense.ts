@@ -11,7 +11,7 @@
  * 5. Refine Intent Graph
  */
 
-import { getServerAuthHeaders } from '@/lib/server-auth';
+import { getServerAuthHeaders, asFetchHeaders } from '@/lib/server-auth';
 import { getApiBase } from '@/lib/api-base';
 
 // ============================================
@@ -125,9 +125,7 @@ export async function uploadSenseInputs(
 
       const response = await fetch(`${getApiBase()}/api/uploads`, {
         method: 'POST',
-        headers: {
-          'Authorization': authHeaders!.Authorization,
-        },
+        headers: asFetchHeaders(authHeaders),
         body: formData,
       });
 
@@ -187,7 +185,7 @@ export async function processIntent(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': authHeaders!.Authorization,
+        ...asFetchHeaders(authHeaders),
       },
       body: JSON.stringify({
         projectId,
@@ -242,9 +240,7 @@ export async function getIntentGraph(
 
     const response = await fetch(`${getApiBase()}/api/sense/${projectId}`, {
       method: 'GET',
-      headers: {
-        'Authorization': authHeaders!.Authorization,
-      },
+      headers: asFetchHeaders(authHeaders),
       cache: 'no-store',
     });
 
@@ -303,7 +299,7 @@ export async function refineIntentGraph(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': authHeaders!.Authorization,
+        ...asFetchHeaders(authHeaders),
       },
       body: JSON.stringify({ refinements }),
     });
@@ -354,9 +350,7 @@ export async function deleteIntentGraph(
 
     const response = await fetch(`${getApiBase()}/api/sense/${projectId}`, {
       method: 'DELETE',
-      headers: {
-        'Authorization': authHeaders!.Authorization,
-      },
+      headers: asFetchHeaders(authHeaders),
     });
 
     if (!response.ok) {
@@ -400,9 +394,7 @@ export async function getSenseJobStatus(
 
     const response = await fetch(`${getApiBase()}/api/jobs/${jobId}`, {
       method: 'GET',
-      headers: {
-        'Authorization': authHeaders!.Authorization,
-      },
+      headers: asFetchHeaders(authHeaders),
       cache: 'no-store',
     });
 

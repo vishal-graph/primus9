@@ -10,7 +10,7 @@
 
 'use server';
 
-import { getServerAuthHeaders } from '@/lib/server-auth';
+import { getServerAuthHeaders, asFetchHeaders } from '@/lib/server-auth';
 import { getApiBase } from '@/lib/api-base';
 
 // ============================================
@@ -93,7 +93,7 @@ export async function saveIntent(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': authHeaders!.Authorization,
+        ...asFetchHeaders(authHeaders),
       },
       body: JSON.stringify({
         scope,
@@ -132,9 +132,7 @@ export async function lockIntent(
 
     const response = await fetch(`${getApiBase()}/api/projects/${projectId}/intents/${intentId}/lock`, {
       method: 'POST',
-      headers: {
-        'Authorization': authHeaders!.Authorization,
-      },
+      headers: asFetchHeaders(authHeaders),
     });
 
     if (!response.ok) {
@@ -176,7 +174,7 @@ export async function triggerMoodboardGeneration(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': authHeaders!.Authorization,
+        ...asFetchHeaders(authHeaders),
       },
       body: JSON.stringify({
         type: 'MOODBOARD',
@@ -247,9 +245,9 @@ export async function triggerGlobalMoodboardGeneration(
         const response = await fetch(`${getApiBase()}/api/jobs`, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
-            'Authorization': authHeaders!.Authorization,
-          },
+        'Content-Type': 'application/json',
+        ...asFetchHeaders(authHeaders),
+      },
           body: JSON.stringify({
             type: 'MOODBOARD',
             projectId,
@@ -337,9 +335,9 @@ export async function regenerateAllMoodboards(
         const response = await fetch(`${getApiBase()}/api/jobs`, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
-            'Authorization': authHeaders!.Authorization,
-          },
+        'Content-Type': 'application/json',
+        ...asFetchHeaders(authHeaders),
+      },
           body: JSON.stringify({
             type: 'MOODBOARD',
             projectId,
@@ -400,9 +398,7 @@ export async function getMoodboardJobStatus(
     }
 
     const response = await fetch(`${getApiBase()}/api/jobs/${jobId}`, {
-      headers: {
-        'Authorization': authHeaders!.Authorization,
-      },
+      headers: asFetchHeaders(authHeaders),
     });
 
     if (!response.ok) {
@@ -444,9 +440,7 @@ export async function getProjectIntents(
     }
 
     const response = await fetch(`${getApiBase()}/api/projects/${projectId}/intents`, {
-      headers: {
-        'Authorization': authHeaders!.Authorization,
-      },
+      headers: asFetchHeaders(authHeaders),
     });
 
     if (!response.ok) {
@@ -496,9 +490,7 @@ export async function getProjectActiveJobs(
     }
 
     const response = await fetch(`${getApiBase()}/api/jobs?projectId=${projectId}&status=QUEUED,PROCESSING`, {
-      headers: {
-        'Authorization': authHeaders!.Authorization,
-      },
+      headers: asFetchHeaders(authHeaders),
     });
 
     if (!response.ok) {
@@ -540,9 +532,7 @@ export async function getProjectMoodboards(
 
     // Fetch project with rooms and their moodboards
     const response = await fetch(`${getApiBase()}/api/projects/${projectId}`, {
-      headers: {
-        'Authorization': authHeaders!.Authorization,
-      },
+      headers: asFetchHeaders(authHeaders),
     });
 
     if (!response.ok) {
@@ -631,9 +621,7 @@ export async function regenerateMoodboard(
 
     try {
       const projectResponse = await fetch(`${getApiBase()}/api/projects/${projectId}`, {
-        headers: {
-          'Authorization': authHeaders!.Authorization,
-        },
+        headers: asFetchHeaders(authHeaders),
       });
 
       if (projectResponse.ok) {
@@ -651,7 +639,7 @@ export async function regenerateMoodboard(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': authHeaders!.Authorization,
+        ...asFetchHeaders(authHeaders),
       },
       body: JSON.stringify({
         type: 'MOODBOARD',
