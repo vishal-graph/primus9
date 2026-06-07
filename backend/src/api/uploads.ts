@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
 import { errors } from '../lib/error-handler';
-import { storageService } from '../services/storage';
+import { storageService, isStorageNotFoundError } from '../services/storage';
 import { config } from '../config';
 import { AssetType } from '@prisma/client';
 
@@ -342,14 +342,27 @@ router.get('/assets/:projectId', async (req, res, next) => {
       ],
     });
 
-    // Generate download URLs for each asset
+    // Generate download URLs — skip missing objects (legacy S3 assets not migrated to Supabase)
     const assetsWithUrls = await Promise.all(
       assets.map(async (asset) => {
         const bucket = getBucketFromName(asset.s3Bucket);
-        const downloadUrl = bucket 
-          ? await storageService.generateDownloadUrl(bucket, asset.s3Key)
-          : null;
-        return { ...asset, downloadUrl };
+        if (!bucket) {
+          return { ...asset, downloadUrl: null };
+        }
+        try {
+          const downloadUrl = await storageService.generateDownloadUrl(bucket, asset.s3Key);
+          return { ...asset, downloadUrl };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (isStorageNotFoundError(message)) {
+            logger.warn(
+              { projectId, assetId: asset.id, s3Key: asset.s3Key, bucket: asset.s3Bucket },
+              'Asset record exists but file missing in Supabase storage'
+            );
+            return { ...asset, downloadUrl: null };
+          }
+          throw err;
+        }
       })
     );
 
@@ -396,14 +409,23 @@ router.get('/assets/:projectId/:assetId/versions', async (req, res, next) => {
       orderBy: { version: 'desc' },
     });
 
-    // Generate download URLs
+    // Generate download URLs — skip missing objects (legacy S3 assets)
     const versionsWithUrls = await Promise.all(
       versions.map(async (v) => {
         const bucket = getBucketFromName(v.s3Bucket);
-        const downloadUrl = bucket 
-          ? await storageService.generateDownloadUrl(bucket, v.s3Key)
-          : null;
-        return { ...v, downloadUrl };
+        if (!bucket) {
+          return { ...v, downloadUrl: null };
+        }
+        try {
+          const downloadUrl = await storageService.generateDownloadUrl(bucket, v.s3Key);
+          return { ...v, downloadUrl };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (isStorageNotFoundError(message)) {
+            return { ...v, downloadUrl: null };
+          }
+          throw err;
+        }
       })
     );
 

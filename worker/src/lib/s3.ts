@@ -28,11 +28,25 @@ function getSupabase(): SupabaseClient {
   return supabaseClient;
 }
 
+function normalizeStorageBucket(name: string, fallback: string): string {
+  const trimmed = name?.trim() || '';
+  if (!trimmed) return fallback;
+  const lower = trimmed.toLowerCase();
+  if (lower.includes('tatvaops-vision') || lower.includes('production-')) {
+    if (lower.includes('floorplan')) return 'floorplans';
+    if (lower.includes('moodboard')) return 'moodboards';
+    if (lower.includes('export')) return 'exports';
+    if (lower.includes('render') || lower.includes('elevation')) return 'renders';
+    return fallback;
+  }
+  return trimmed;
+}
+
 function resolveBucketName(name: string): string {
-  const floorplans = process.env.S3_BUCKET_FLOORPLANS || 'floorplans';
-  const moodboards = process.env.S3_BUCKET_MOODBOARDS || 'moodboards';
-  const renders = process.env.S3_BUCKET_RENDERS || 'renders';
-  const exportsBucket = process.env.S3_BUCKET_EXPORTS || 'exports';
+  const floorplans = normalizeStorageBucket(process.env.S3_BUCKET_FLOORPLANS || '', 'floorplans');
+  const moodboards = normalizeStorageBucket(process.env.S3_BUCKET_MOODBOARDS || '', 'moodboards');
+  const renders = normalizeStorageBucket(process.env.S3_BUCKET_RENDERS || '', 'renders');
+  const exportsBucket = normalizeStorageBucket(process.env.S3_BUCKET_EXPORTS || '', 'exports');
   const known = [floorplans, moodboards, renders, exportsBucket];
   if (known.includes(name)) return name;
 

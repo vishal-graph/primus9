@@ -10,6 +10,26 @@ import { createStorageSupabaseClient } from '../lib/supabase-storage-client';
 
 export type BucketType = 'floorplans' | 'moodboards' | 'renders' | 'exports';
 
+/** Map legacy AWS bucket env values to Supabase bucket ids. */
+function normalizeStorageBucket(name: string, fallback: BucketType): string {
+  const trimmed = name?.trim() || '';
+  if (!trimmed) return fallback;
+  const lower = trimmed.toLowerCase();
+  if (lower.includes('tatvaops-vision') || lower.includes('production-')) {
+    if (lower.includes('floorplan')) return 'floorplans';
+    if (lower.includes('moodboard')) return 'moodboards';
+    if (lower.includes('export')) return 'exports';
+    if (lower.includes('render') || lower.includes('elevation')) return 'renders';
+    return fallback;
+  }
+  return trimmed;
+}
+
+export function isStorageNotFoundError(message: string): boolean {
+  const m = message.toLowerCase();
+  return m.includes('not found') || m.includes('does not exist') || m.includes('object not found');
+}
+
 interface UploadOptions {
   bucket: BucketType;
   filename: string;
@@ -26,10 +46,10 @@ export class StorageService {
     this.supabase = createStorageSupabaseClient(config.supabaseUrl, config.supabaseServiceRoleKey);
 
     this.bucketMap = {
-      floorplans: config.s3BucketFloorplans,
-      moodboards: config.s3BucketMoodboards,
-      renders: config.s3BucketRenders,
-      exports: config.s3BucketExports,
+      floorplans: normalizeStorageBucket(config.s3BucketFloorplans, 'floorplans'),
+      moodboards: normalizeStorageBucket(config.s3BucketMoodboards, 'moodboards'),
+      renders: normalizeStorageBucket(config.s3BucketRenders, 'renders'),
+      exports: normalizeStorageBucket(config.s3BucketExports, 'exports'),
     };
   }
 
@@ -74,7 +94,10 @@ export class StorageService {
       .createSignedUploadUrl(key, { upsert: true });
 
     if (error || !data?.signedUrl) {
-      throw new Error(error?.message || 'Failed to create signed upload URL');
+      const msg = error?.message || 'Failed to create signed upload URL';
+      throw new Error(
+        `${msg} (bucket: ${bucketName}). Ensure Supabase Storage bucket "${bucketName}" exists and SUPABASE_* env vars are set on Render.`
+      );
     }
 
     // Content-Type must match on PUT; Supabase signs without binding type in all versions,
