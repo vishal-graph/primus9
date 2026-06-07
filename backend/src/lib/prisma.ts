@@ -6,6 +6,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
+import { config, redactDatabaseUrl } from '../config';
 import { logger } from './logger';
 
 // Extend global type for Node.js
@@ -17,6 +18,7 @@ declare global {
 // Create client with logging configuration
 const createPrismaClient = () => {
   return new PrismaClient({
+    datasources: { db: { url: config.databaseUrl } },
     log: [
       { level: 'query', emit: 'event' },
       { level: 'error', emit: 'stdout' },
@@ -46,19 +48,24 @@ prisma.$on('query' as never, (e: { query: string; duration: number }) => {
  * Connect to database with retry logic
  */
 export async function connectDatabase(retries = 5): Promise<void> {
+  logger.info({ databaseUrl: redactDatabaseUrl(config.databaseUrl) }, 'Connecting to database');
+
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       await prisma.$connect();
       logger.info('✅ Database connected successfully');
       return;
     } catch (error) {
-      logger.error({ error, attempt }, `Database connection failed (attempt ${attempt}/${retries})`);
-      
+      const err = error as Error;
+      logger.error(
+        { message: err.message, attempt, databaseUrl: redactDatabaseUrl(config.databaseUrl) },
+        `Database connection failed (attempt ${attempt}/${retries})`
+      );
+
       if (attempt === retries) {
-        throw new Error('Failed to connect to database after multiple attempts');
+        throw new Error(`Failed to connect to database: ${err.message}`);
       }
-      
-      // Exponential backoff
+
       const delay = Math.min(1000 * Math.pow(2, attempt), 10000);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
