@@ -67,9 +67,22 @@ import {
 } from '@/lib/actions/elevation';
 import { getProjectData } from '@/lib/actions/floor-plan';
 import { getApiBase } from '@/lib/api-base';
+import { getJobs } from '@/lib/actions/ai-job';
 
 interface ElevationStageProps {
   projectId: string;
+}
+
+function parseIsometricJobError(error: string | undefined): string {
+  if (!error) return 'Isometric generation failed. Please try again.';
+  try {
+    const parsed = JSON.parse(error) as { message?: string; code?: string };
+    if (parsed.message) return parsed.message;
+    if (parsed.code) return `Generation failed (${parsed.code})`;
+  } catch {
+    return error;
+  }
+  return 'Isometric generation failed. Please try again.';
 }
 
 export function ElevationStage({ projectId }: ElevationStageProps) {
@@ -96,6 +109,7 @@ export function ElevationStage({ projectId }: ElevationStageProps) {
   
   // Polling ref
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const trackingJobIdRef = useRef<string | null>(null);
 
   // ===========================================
   // Load Data
@@ -134,6 +148,7 @@ export function ElevationStage({ projectId }: ElevationStageProps) {
       // Check for active jobs
       const jobsResult = await getActiveIsometricJobs(projectId);
       if (jobsResult.success && jobsResult.jobs && jobsResult.jobs.length > 0) {
+        trackingJobIdRef.current = jobsResult.jobs[0].jobId;
         setActiveJob(jobsResult.jobs[0]);
         setIsGenerating(true);
         startPolling();
@@ -169,14 +184,32 @@ export function ElevationStage({ projectId }: ElevationStageProps) {
       
       if (result.success) {
         if (!result.jobs || result.jobs.length === 0) {
-          // Job completed
+          // Job finished (completed or failed)
           setIsGenerating(false);
           setActiveJob(null);
           clearInterval(pollingIntervalRef.current!);
           pollingIntervalRef.current = null;
-          
-          // Reload data
-          loadData();
+
+          const trackedJobId = trackingJobIdRef.current;
+          trackingJobIdRef.current = null;
+
+          let failureMessage: string | null = null;
+          if (trackedJobId) {
+            const jobsResult = await getJobs({
+              projectId,
+              type: 'INTERIOR_ISOMETRIC',
+              limit: 10,
+            });
+            const finishedJob = jobsResult.data?.find((j) => j.id === trackedJobId);
+            if (finishedJob?.status === 'FAILED') {
+              failureMessage = parseIsometricJobError(finishedJob.error);
+            }
+          }
+
+          await loadData();
+          if (failureMessage) {
+            setError(failureMessage);
+          }
         } else {
           setActiveJob(result.jobs[0]);
         }
@@ -206,6 +239,7 @@ export function ElevationStage({ projectId }: ElevationStageProps) {
       const result = await triggerIsometricGeneration(projectId, 1, nextVersion);
       
       if (result.success && result.jobId) {
+        trackingJobIdRef.current = result.jobId;
         setActiveJob({
           jobId: result.jobId,
           projectId,

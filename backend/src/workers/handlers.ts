@@ -148,6 +148,20 @@ async function runSqsHandler(
   if (!shouldDelete) {
     // shouldDelete=false means the handler determined this is transient and wants a retry.
     // shouldDelete=true means success or permanent failure (no retry needed).
+    let handlerError: string | undefined;
+    try {
+      const dbJob = await prisma.aIJob.findUnique({
+        where: { id: jobId },
+        select: { error: true },
+      });
+      handlerError = dbJob?.error ?? undefined;
+    } catch {
+      // Best-effort — retry logging should not block the queue.
+    }
+    logger.warn(
+      { jobId, type, handlerError },
+      `[BullMQ] Handler requested retry for ${type} job ${jobId}`
+    );
     throw new Error(`Handler requested retry for ${type} job ${jobId}`);
   }
 }
