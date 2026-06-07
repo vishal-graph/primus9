@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
 import { logger } from './logger';
+import { StorageError } from '../services/storage';
 
 /**
  * Custom Application Error
@@ -74,6 +75,18 @@ export function errorHandler(
         code: 'VALIDATION_ERROR',
         message: 'Validation failed',
         details: err.errors,
+      },
+    });
+  }
+
+  // Handle storage configuration / bucket errors
+  if (err instanceof StorageError) {
+    logger.error({ requestId, message: err.message }, 'Storage error');
+    return res.status(503).json({
+      success: false,
+      error: {
+        code: 'STORAGE_ERROR',
+        message: err.message,
       },
     });
   }

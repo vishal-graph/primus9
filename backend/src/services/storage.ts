@@ -2,6 +2,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config';
 import { createStorageSupabaseClient } from '../lib/supabase-storage-client';
+import { logger } from '../lib/logger';
 
 /**
  * Storage Service — Supabase Storage
@@ -27,7 +28,19 @@ function normalizeStorageBucket(name: string, fallback: BucketType): string {
 
 export function isStorageNotFoundError(message: string): boolean {
   const m = message.toLowerCase();
-  return m.includes('not found') || m.includes('does not exist') || m.includes('object not found');
+  return (
+    m.includes('not found') ||
+    m.includes('does not exist') ||
+    m.includes('object not found') ||
+    m.includes('related resource')
+  );
+}
+
+export class StorageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StorageError';
+  }
 }
 
 interface UploadOptions {
@@ -95,8 +108,19 @@ export class StorageService {
 
     if (error || !data?.signedUrl) {
       const msg = error?.message || 'Failed to create signed upload URL';
-      throw new Error(
-        `${msg} (bucket: ${bucketName}). Ensure Supabase Storage bucket "${bucketName}" exists and SUPABASE_* env vars are set on Render.`
+
+      if (isStorageNotFoundError(msg)) {
+        await this.ensureBucketExists(bucketName, bucket);
+        const retry = await this.supabase.storage
+          .from(bucketName)
+          .createSignedUploadUrl(key, { upsert: true });
+        if (retry.data?.signedUrl) {
+          return { url: retry.data.signedUrl, key: retry.data.path || key };
+        }
+      }
+
+      throw new StorageError(
+        `${msg} (bucket: ${bucketName}, project: ${config.supabaseUrl}). Create bucket in Supabase Storage or check SUPABASE_SERVICE_ROLE_KEY.`
       );
     }
 
@@ -155,6 +179,66 @@ export class StorageService {
 
   getBucketName(bucket: BucketType): string {
     return this.bucketMap[bucket];
+  }
+
+  getBucketNames(): Record<BucketType, string> {
+    return { ...this.bucketMap };
+  }
+
+  /** Verify Supabase Storage and create missing buckets (Render / fresh projects). */
+  async ensureReady(): Promise<void> {
+    const { data: existing, error: listError } = await this.supabase.storage.listBuckets();
+    if (listError) {
+      throw new StorageError(
+        `Supabase Storage listBuckets failed: ${listError.message}. Verify SUPABASE_SERVICE_ROLE_KEY on Render.`
+      );
+    }
+
+    const existingNames = new Set((existing ?? []).map((b) => b.name));
+    for (const [type, bucketName] of Object.entries(this.bucketMap) as [BucketType, string][]) {
+      if (existingNames.has(bucketName)) continue;
+
+      const isPublic = type !== 'exports';
+      const { error: createError } = await this.supabase.storage.createBucket(bucketName, {
+        public: isPublic,
+      });
+
+      if (createError && !/already exists/i.test(createError.message)) {
+        throw new StorageError(
+          `Failed to create storage bucket "${bucketName}": ${createError.message}`
+        );
+      }
+
+      logger.info({ bucket: bucketName, public: isPublic }, 'Created Supabase storage bucket');
+      existingNames.add(bucketName);
+    }
+
+    const probeKey = `_startup/${Date.now()}-probe.txt`;
+    const { error: signError } = await this.supabase.storage
+      .from(this.bucketMap.floorplans)
+      .createSignedUploadUrl(probeKey, { upsert: true });
+
+    if (signError) {
+      throw new StorageError(
+        `Storage upload URL probe failed for bucket "${this.bucketMap.floorplans}": ${signError.message}`
+      );
+    }
+
+    logger.info(
+      { supabaseUrl: config.supabaseUrl, buckets: this.bucketMap },
+      'Supabase Storage ready'
+    );
+  }
+
+  private async ensureBucketExists(bucketName: string, type: BucketType): Promise<void> {
+    const { data: existing } = await this.supabase.storage.listBuckets();
+    if (existing?.some((b) => b.name === bucketName)) return;
+
+    const isPublic = type !== 'exports';
+    const { error } = await this.supabase.storage.createBucket(bucketName, { public: isPublic });
+    if (error && !/already exists/i.test(error.message)) {
+      throw new StorageError(`Bucket "${bucketName}" missing: ${error.message}`);
+    }
   }
 }
 

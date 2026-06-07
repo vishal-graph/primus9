@@ -131,17 +131,22 @@ type Config = z.infer<typeof configSchema>;
  * Cloud Redis often requires TLS. Plain `redis://` to Upstash (etc.) is reset by the server → ECONNRESET.
  * Auto-upgrade to `rediss://` when the host is a known TLS-only endpoint.
  */
+/** Extract Supabase project ref from a URL or Postgres connection string. */
+function extractSupabaseProjectRef(input: string): string | undefined {
+  if (!input) return undefined;
+  const urlMatch = input.match(/https?:\/\/([a-z0-9]+)\.supabase\.co/i);
+  if (urlMatch?.[1]) return urlMatch[1];
+  const poolerMatch = input.match(/postgres\.([a-z0-9]+)/i);
+  if (poolerMatch?.[1]) return poolerMatch[1];
+  const directMatch = input.match(/db\.([a-z0-9]+)\.supabase\.co/i);
+  if (directMatch?.[1]) return directMatch[1];
+  return undefined;
+}
+
 /** e.g. postgres.dcxbzjtgitqxbbcnxzwh@... or db.dcxbzjtgitqxbbcnxzwh.supabase.co → project URL */
 function deriveSupabaseUrlFromDatabaseUrl(databaseUrl: string): string | undefined {
-  const poolerMatch = databaseUrl.match(/postgres\.([a-z0-9]+)/i);
-  if (poolerMatch?.[1]) {
-    return `https://${poolerMatch[1]}.supabase.co`;
-  }
-  const directMatch = databaseUrl.match(/db\.([a-z0-9]+)\.supabase\.co/i);
-  if (directMatch?.[1]) {
-    return `https://${directMatch[1]}.supabase.co`;
-  }
-  return undefined;
+  const ref = extractSupabaseProjectRef(databaseUrl);
+  return ref ? `https://${ref}.supabase.co` : undefined;
 }
 
 /**
@@ -234,10 +239,19 @@ function loadConfig(): Config {
     if (databaseUrl && databaseUrl !== databaseUrlRaw) {
       process.env.DATABASE_URL = databaseUrl;
     }
-    const supabaseUrl =
-      process.env.SUPABASE_URL?.trim() ||
-      deriveSupabaseUrlFromDatabaseUrl(databaseUrl) ||
-      '';
+
+    const dbProjectRef = extractSupabaseProjectRef(databaseUrl);
+    const envSupabaseUrl = process.env.SUPABASE_URL?.trim() || '';
+    const envProjectRef = envSupabaseUrl ? extractSupabaseProjectRef(envSupabaseUrl) : undefined;
+
+    // Storage must use the same Supabase project as Postgres (common Render misconfig).
+    let supabaseUrl = envSupabaseUrl || (dbProjectRef ? `https://${dbProjectRef}.supabase.co` : '');
+    if (dbProjectRef && envProjectRef && dbProjectRef !== envProjectRef) {
+      console.warn(
+        `[config] SUPABASE_URL project (${envProjectRef}) differs from DATABASE_URL (${dbProjectRef}); using DATABASE_URL project for storage`
+      );
+      supabaseUrl = `https://${dbProjectRef}.supabase.co`;
+    }
 
     const parsed = configSchema.parse({
       // Server

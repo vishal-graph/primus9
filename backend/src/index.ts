@@ -10,6 +10,7 @@ import { requestIdMiddleware } from './lib/request-id';
 import { rateLimiter } from './lib/rate-limiter';
 import { connectDatabase, disconnectDatabase } from './lib/prisma';
 import { connectRedis, disconnectRedis } from './lib/redis-client';
+import { storageService } from './services/storage';
 
 // Middleware
 import { authMiddleware } from './middleware/auth';
@@ -100,6 +101,9 @@ async function startServer() {
   try {
     // Connect to database
     await connectDatabase();
+
+    // Verify Supabase Storage (creates missing buckets)
+    await storageService.ensureReady();
     
     // Connect to Redis (optional, graceful degradation)
     if (config.redisEnabled) {
