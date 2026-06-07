@@ -6,6 +6,7 @@ import { logger } from '../lib/logger';
 import { errors } from '../lib/error-handler';
 import { aiRateLimiter } from '../lib/rate-limiter';
 import { aiJobQueue } from '../workers/queue';
+import { validateComponentExtractionPrerequisites } from '../services/component-extraction-prerequisites';
 import { jobCache, rateLimit } from '../lib/redis-client';
 import { AIJobType, AIJobStatus, ProjectStage, UserPlan } from '@prisma/client';
 import { checkRegenerationLimit, incrementRegenerationCount, checkRateLimit as checkPlanRateLimit } from '../services/plan-guardrails';
@@ -381,6 +382,21 @@ router.post('/', aiRateLimiter, async (req, res, next) => {
       });
       if (!room) {
         throw errors.notFound('Room');
+      }
+    }
+
+    if (input.type === 'COMPONENT_EXTRACTION') {
+      const roomId =
+        input.roomId ?? (input.payload as { roomId?: string } | undefined)?.roomId;
+      if (!roomId) {
+        throw errors.badRequest('roomId is required for component extraction');
+      }
+      const prereq = await validateComponentExtractionPrerequisites(
+        input.projectId,
+        roomId
+      );
+      if (!prereq.ok) {
+        throw errors.badRequest(prereq.message);
       }
     }
 

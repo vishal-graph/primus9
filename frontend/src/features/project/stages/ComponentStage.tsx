@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { getAccessToken } from '@/lib/auth-client';
 import {
   Box,
@@ -36,6 +36,8 @@ interface ComponentStageProps {
   projectId: string;
   projectSlug?: string;
 }
+
+const STALE_COMPONENT_QUEUE_MS = 8 * 60 * 1000;
 
 function formatInrCell(value: unknown): string {
   if (value === null || value === undefined || value === '') return '—';
@@ -77,6 +79,8 @@ export function ComponentStage({ projectId, projectSlug }: ComponentStageProps) 
   const [generatingRoomIds, setGeneratingRoomIds] = useState<Set<string>>(new Set());
   const [generatingAll, setGeneratingAll] = useState(false);
   const [roomOrderIds, setRoomOrderIds] = useState<Map<string, string>>(new Map());
+  const [roomJobErrors, setRoomJobErrors] = useState<Map<string, string>>(new Map());
+  const componentsLoadInFlight = useRef(false);
 
   const selectedRoomTable = useMemo(
     () => roomTables.find((table) => table.roomId === selectedRoomId) || null,
@@ -111,19 +115,24 @@ export function ComponentStage({ projectId, projectSlug }: ComponentStageProps) 
    */
   const loadComponents = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent === true;
+    if (componentsLoadInFlight.current) return;
+    componentsLoadInFlight.current = true;
     if (!silent) {
       setLoading(true);
       setError(null);
     }
-    const result = await getProjectComponents(projectId);
-    if (!result.success) {
-      setError(result.error || 'Failed to load components');
+    try {
+      const result = await getProjectComponents(projectId);
+      if (!result.success) {
+        setError(result.error || 'Failed to load components');
+        return;
+      }
+      setRoomTables(result.data?.rooms || []);
+      setError(null);
+    } finally {
+      componentsLoadInFlight.current = false;
       if (!silent) setLoading(false);
-      return;
     }
-    setRoomTables(result.data?.rooms || []);
-    setError(null);
-    if (!silent) setLoading(false);
   }, [projectId]);
 
   useEffect(() => {
@@ -145,15 +154,38 @@ export function ComponentStage({ projectId, projectSlug }: ComponentStageProps) 
   const syncActiveComponentJobs = useCallback(async () => {
     const jobs = await getJobs({ projectId, type: 'COMPONENT_EXTRACTION', limit: 50 });
     const activeRoomIds = new Set<string>();
+    const errorsByRoom = new Map<string, string>();
+
     for (const job of jobs.data || []) {
+      const payload = job.payload as { roomId?: string };
+      const roomId = payload?.roomId;
+      if (!roomId) continue;
+
+      if (job.status === 'FAILED') {
+        const msg =
+          job.error ||
+          (typeof job.result === 'object' && job.result && 'error' in job.result
+            ? String((job.result as { error?: string }).error)
+            : 'Component extraction failed');
+        errorsByRoom.set(roomId, msg);
+        continue;
+      }
+
       if (job.status === 'QUEUED' || job.status === 'PROCESSING') {
-        const payload = job.payload as { roomId?: string };
-        if (payload?.roomId) {
-          activeRoomIds.add(payload.roomId);
+        const ageMs = Date.now() - new Date(job.createdAt).getTime();
+        if (job.status === 'QUEUED' && ageMs > STALE_COMPONENT_QUEUE_MS) {
+          errorsByRoom.set(
+            roomId,
+            'Extraction has been queued for a long time. Ensure the Render worker service (MODE=worker) is running.'
+          );
+          continue;
         }
+        activeRoomIds.add(roomId);
       }
     }
+
     setGeneratingRoomIds(activeRoomIds);
+    setRoomJobErrors(errorsByRoom);
   }, [projectId]);
 
   useEffect(() => {
@@ -176,9 +208,16 @@ export function ComponentStage({ projectId, projectSlug }: ComponentStageProps) 
 
   const handleGenerateRoom = async (roomId: string) => {
     setGeneratingRoomIds((prev) => new Set(prev).add(roomId));
+    setRoomJobErrors((prev) => {
+      const next = new Map(prev);
+      next.delete(roomId);
+      return next;
+    });
+    setError(null);
     const result = await triggerComponentExtraction(projectId, roomId);
     if (!result.success) {
       setError(result.error || 'Failed to start extraction');
+      setRoomJobErrors((prev) => new Map(prev).set(roomId, result.error || 'Failed to start extraction'));
       setGeneratingRoomIds((prev) => {
         const next = new Set(prev);
         next.delete(roomId);
@@ -186,6 +225,7 @@ export function ComponentStage({ projectId, projectSlug }: ComponentStageProps) 
       });
       return;
     }
+    await syncActiveComponentJobs();
   };
 
   const handleGenerateAll = async () => {
@@ -370,9 +410,18 @@ export function ComponentStage({ projectId, projectSlug }: ComponentStageProps) 
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                 <CircularProgress size={20} />
                 <Typography variant="body2" color="text.secondary">
-                  Extracting components for this room...
+                  Extracting components for this room… (usually 1–3 minutes)
                 </Typography>
               </Box>
+            ) : selectedRoomId && roomJobErrors.has(selectedRoomId) ? (
+              <Stack spacing={1}>
+                <Typography variant="body2" color="error">
+                  {roomJobErrors.get(selectedRoomId)}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Complete Moodboard, Elevation, and 2D Views for this room, then try Generate again.
+                </Typography>
+              </Stack>
             ) : (
               <Typography variant="body2" color="text.secondary">
                 No component extraction found for this room yet.

@@ -34,6 +34,19 @@ import { enrichExtractionRowsWithCatalog } from '../services/extraction-catalog-
 
 const prisma = getPrisma();
 
+async function failComponentExtractionJob(jobId: string, error: string): Promise<boolean> {
+  await prisma.aIJob.update({
+    where: { id: jobId },
+    data: {
+      status: 'FAILED',
+      completedAt: new Date(),
+      error,
+      result: { error },
+    },
+  });
+  return true;
+}
+
 interface ComponentExtractionJobPayload {
   jobId: string;
   projectId: string;
@@ -300,8 +313,16 @@ export async function handleComponentExtraction(
 
     if (!jobId || !projectId || !roomId || !userId) {
       logger.error('Missing required job fields', { jobId, projectId, roomId, userId });
+      if (jobId) {
+        return failComponentExtractionJob(jobId, 'Invalid job payload: missing required fields');
+      }
       return true;
     }
+
+    await prisma.aIJob.update({
+      where: { id: jobId },
+      data: { status: 'PROCESSING', startedAt: new Date() },
+    });
 
     const isRegeneration = (payload.version || 1) > 1;
     const guardrails = await validateJobGuardrails(
@@ -341,7 +362,7 @@ export async function handleComponentExtraction(
 
     if (!room) {
       logger.error('Room not found for component extraction', { roomId, projectId });
-      return true;
+      return failComponentExtractionJob(jobId, 'Room not found for component extraction');
     }
 
     const moodboard = await prisma.roomMoodboard.findFirst({
@@ -352,7 +373,10 @@ export async function handleComponentExtraction(
 
     if (!moodboard?.s3Key) {
       logger.error('Missing moodboard for component extraction', { roomId, projectId });
-      return true;
+      return failComponentExtractionJob(
+        jobId,
+        `Generate a moodboard for ${room.name} before extracting components.`
+      );
     }
 
     const isometric = await prisma.isometricFloorElevation.findFirst({
@@ -362,7 +386,10 @@ export async function handleComponentExtraction(
 
     if (!isometric?.s3Key) {
       logger.error('Missing isometric elevation for component extraction', { projectId });
-      return true;
+      return failComponentExtractionJob(
+        jobId,
+        'Generate the 3D isometric elevation before extracting components.'
+      );
     }
 
     const views = await prisma.room2DView.findMany({
@@ -393,7 +420,10 @@ export async function handleComponentExtraction(
         projectId,
         missingViews,
       });
-      return true;
+      return failComponentExtractionJob(
+        jobId,
+        `Generate 2D bird's-eye view for ${room.name} before extracting components (2D Views stage).`
+      );
     }
 
     const parts: GeminiPart[] = [];
