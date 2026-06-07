@@ -28,7 +28,6 @@
  */
 
 import { Message } from '@aws-sdk/client-sqs';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import {
   generateIsometricElevation,
   extractFloorGeometry,
@@ -40,6 +39,7 @@ import { config } from '../config';
 import { logger } from '../lib/logger';
 import { validateJobGuardrails } from '../services/plan-guardrails';
 import { getPrisma } from '../lib/prisma';
+import { uploadToS3 as uploadToStorage, getPublicStorageUrl } from '../lib/s3';
 
 const prisma = getPrisma();
 
@@ -357,8 +357,9 @@ export async function handleInteriorIsometricGeneration(
     });
 
     let imageUrl: string;
+    let uploadedS3Key: string;
     try {
-      const uploadResult = await uploadToS3({
+      const uploadResult = await uploadIsometricToStorage({
         projectId,
         floor,
         version,
@@ -367,17 +368,18 @@ export async function handleInteriorIsometricGeneration(
       });
       
       imageUrl = uploadResult.url;
+      uploadedS3Key = uploadResult.s3Key;
       
-      logger.info('S3 upload successful', {
+      logger.info('Storage upload successful', {
         s3Key: uploadResult.s3Key,
       });
     } catch (uploadError) {
       const uploadErrMsg = uploadError instanceof Error ? uploadError.message : String(uploadError);
-      logger.error('S3 upload failed', { error: uploadErrMsg });
+      logger.error('Storage upload failed', { error: uploadErrMsg });
       throw new IsometricGenerationError(
         IsometricErrorCode.STORAGE_FAILED,
-        `S3 upload failed: ${uploadErrMsg}`,
-        true
+        `Storage upload failed: ${uploadErrMsg}`,
+        false
       );
     }
 
@@ -397,7 +399,7 @@ export async function handleInteriorIsometricGeneration(
         floor,
         version,
         imageUrl,
-        s3Key: result.output.s3Key,
+        s3Key: uploadedS3Key,
         geometryHash: result.output.geometryHash,
         styleHash: result.output.styleHash,
         roomCount: result.output.roomCount,
@@ -572,13 +574,10 @@ async function storeIsometricElevation(params: {
 }
 
 // ===========================================
-// S3 Upload
+// Storage Upload (Supabase)
 // ===========================================
 
-/**
- * Upload isometric elevation to S3.
- */
-async function uploadToS3(params: {
+async function uploadIsometricToStorage(params: {
   projectId: string;
   floor: number;
   version: number;
@@ -586,39 +585,28 @@ async function uploadToS3(params: {
   mimeType: string;
 }): Promise<{ url: string; s3Key: string }> {
   const { projectId, floor, version, imageData, mimeType } = params;
-  
   const extension = mimeType.includes('png') ? 'png' : 'jpg';
   const s3Key = `isometric/${projectId}/floor_${floor}_v${version}.${extension}`;
-  
-  const s3Client = new S3Client({
-    region: process.env.AWS_REGION || 'ap-south-1',
-    credentials: process.env.AWS_ACCESS_KEY_ID ? {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
-    } : undefined,
-  });
+  const bucket = config.s3BucketRenders;
 
-  const bucket = process.env.S3_BUCKET_RENDERS || 'tatvaops-vision-production-renders';
-  
-  const buffer = Buffer.from(imageData, 'base64');
-
-  await s3Client.send(new PutObjectCommand({
-    Bucket: bucket,
-    Key: s3Key,
-    Body: buffer,
-    ContentType: mimeType,
-    Metadata: {
+  await uploadToStorage({
+    bucket,
+    key: s3Key,
+    body: Buffer.from(imageData, 'base64'),
+    contentType: mimeType,
+    metadata: {
       projectId,
       floor: String(floor),
       version: String(version),
     },
-  }));
+  });
 
-  logger.info('Uploaded isometric elevation to S3', { bucket, s3Key });
+  logger.info('Uploaded isometric elevation to Supabase storage', { bucket, s3Key });
 
-  const url = `https://${bucket}.s3.${process.env.AWS_REGION || 'ap-south-1'}.amazonaws.com/${s3Key}`;
-  
-  return { url, s3Key };
+  return {
+    url: getPublicStorageUrl(bucket, s3Key),
+    s3Key,
+  };
 }
 
 // ===========================================
