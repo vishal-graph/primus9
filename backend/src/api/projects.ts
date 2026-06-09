@@ -811,6 +811,23 @@ router.get('/:id/rooms/:roomId/2d-views', async (req, res, next) => {
 // ROOM WALKTHROUGH VIDEOS (Runway Gen-4 Turbo)
 // ============================================
 
+/** Signed URL for playback — public bucket URLs often 404 when renders is private. */
+async function resolveWalkthroughVideoUrl(video: {
+  videoUrl: string;
+  s3Key: string | null;
+}): Promise<string> {
+  if (!video.s3Key) return video.videoUrl;
+  try {
+    return await storageService.generateDownloadUrl('renders', video.s3Key);
+  } catch (err) {
+    logger.warn(
+      { s3Key: video.s3Key, error: String(err) },
+      'Walkthrough signed URL failed; falling back to stored URL'
+    );
+    return video.videoUrl || storageService.getPublicUrl('renders', video.s3Key);
+  }
+}
+
 // GET /api/projects/:id/walkthroughs - Get all walkthrough videos for a project
 router.get('/:id/walkthroughs', async (req, res, next) => {
   try {
@@ -838,16 +855,12 @@ router.get('/:id/walkthroughs', async (req, res, next) => {
       ],
     });
 
-    const enrichedVideos = videos.map((video) => {
-      let downloadUrl = video.videoUrl;
-      if (video.s3Key) {
-        downloadUrl = storageService.getPublicUrl('renders', video.s3Key);
-      }
-      return {
+    const enrichedVideos = await Promise.all(
+      videos.map(async (video) => ({
         ...video,
-        videoUrl: downloadUrl,
-      };
-    });
+        videoUrl: await resolveWalkthroughVideoUrl(video),
+      }))
+    );
 
     res.json({
       success: true,
@@ -889,16 +902,12 @@ router.get('/:id/rooms/:roomId/walkthroughs', async (req, res, next) => {
       ],
     });
 
-    const enrichedVideos = videos.map((video) => {
-      let downloadUrl = video.videoUrl;
-      if (video.s3Key) {
-        downloadUrl = storageService.getPublicUrl('renders', video.s3Key);
-      }
-      return {
+    const enrichedVideos = await Promise.all(
+      videos.map(async (video) => ({
         ...video,
-        videoUrl: downloadUrl,
-      };
-    });
+        videoUrl: await resolveWalkthroughVideoUrl(video),
+      }))
+    );
 
     res.json({
       success: true,

@@ -44,6 +44,7 @@ export function WalkthroughStage({ projectId }: WalkthroughStageProps) {
   const [videosByRoom, setVideosByRoom] = useState<Record<string, RoomWalkthroughVideo[]>>({});
   const [generatingRoomId, setGeneratingRoomId] = useState<string | null>(null);
   const [generatingRoomIds, setGeneratingRoomIds] = useState<Set<string>>(new Set());
+  const [videoPlaybackError, setVideoPlaybackError] = useState<string | null>(null);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
 
   const loadRooms = useCallback(async () => {
@@ -100,6 +101,10 @@ export function WalkthroughStage({ projectId }: WalkthroughStageProps) {
       current.version > latest.version ? current : latest
     );
   }, [roomVideos]);
+
+  useEffect(() => {
+    setVideoPlaybackError(null);
+  }, [latestVideo?.id, latestVideo?.videoUrl]);
 
   const completedRoomIds = useMemo(() => {
     return rooms
@@ -292,11 +297,23 @@ export function WalkthroughStage({ projectId }: WalkthroughStageProps) {
           >
             {latestVideo ? (
               <>
+                {videoPlaybackError && (
+                  <Alert severity="warning" sx={{ position: 'absolute', top: 16, left: 16, right: 64, zIndex: 1 }}>
+                    {videoPlaybackError}
+                  </Alert>
+                )}
                 <Box
                   component="video"
+                  key={latestVideo.videoUrl}
                   src={latestVideo.videoUrl}
                   controls
                   preload="metadata"
+                  playsInline
+                  onError={() =>
+                    setVideoPlaybackError(
+                      'Video failed to load. Try refreshing the page or downloading the file.'
+                    )
+                  }
                   sx={{ width: '100%', height: '100%', borderRadius: 2 }}
                 />
                 <Box sx={{ position: 'absolute', top: 16, right: 16, display: 'flex', gap: 1 }}>
