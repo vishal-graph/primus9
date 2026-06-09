@@ -82,7 +82,7 @@ type Config = z.infer<typeof configSchema>;
 
 /** Same rules as backend — plain redis:// to Upstash is closed by the server. */
 function normalizeRedisUrl(url: string): string {
-  const trimmed = url.trim();
+  const trimmed = url.trim().replace(/^["']|["']$/g, '');
   if (!trimmed.toLowerCase().startsWith('redis://')) {
     return trimmed;
   }

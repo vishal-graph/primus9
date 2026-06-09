@@ -7,8 +7,13 @@
  * Does NOT interact with Clerk — runs in parallel.
  */
 
-const AUTH_SERVICE_URL =
-  process.env.NEXT_PUBLIC_AUTH_SERVICE_URL || 'https://auth.primus9.ai';
+function trimAuthServiceBase(url: string): string {
+  return url.trim().replace(/\/+$/, '');
+}
+
+const AUTH_SERVICE_URL = trimAuthServiceBase(
+  process.env.NEXT_PUBLIC_AUTH_SERVICE_URL || 'https://auth.primus9.ai',
+);
 
 export interface AuthUser {
   id: string;

@@ -20,6 +20,10 @@ envVarGroups:
         sync: false
       - key: REDIS_URL
         sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
       - key: S3_BUCKET_FLOORPLANS
         sync: false
       - key: S3_BUCKET_MOODBOARDS
@@ -74,7 +78,7 @@ services:
     plan: starter
     healthCheckPath: /health
     numInstances: 1
-    branch: release
+    branch: twa
     envVars:
       - fromGroup: tatvaops-vision-shared
       - key: MODE
@@ -91,7 +95,7 @@ services:
     region: singapore
     plan: starter
     numInstances: 1
-    branch: release
+    branch: twa
     envVars:
       - fromGroup: tatvaops-vision-shared
       - key: MODE

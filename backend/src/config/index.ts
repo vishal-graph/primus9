@@ -194,7 +194,8 @@ export function redactDatabaseUrl(url: string): string {
 }
 
 function normalizeRedisUrl(url: string): string {
-  const trimmed = url.trim();
+  // Render/dashboard paste often includes wrapping quotes from .env files.
+  const trimmed = url.trim().replace(/^["']|["']$/g, '');
   if (!trimmed.toLowerCase().startsWith('redis://')) {
     return trimmed;
   }

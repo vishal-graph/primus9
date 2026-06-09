@@ -470,7 +470,7 @@ export async function handleInteriorIsometricGeneration(
       : true;
 
     const errorDetails = error instanceof IsometricGenerationError
-      ? { code: error.code, details: error.details }
+      ? { code: error.code, message: error.message, details: error.details }
       : { message: String(error) };
 
     logger.error('Isometric generation failed', {

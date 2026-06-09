@@ -78,6 +78,9 @@ function parseIsometricJobError(error: string | undefined): string {
   try {
     const parsed = JSON.parse(error) as { message?: string; code?: string };
     if (parsed.message) return parsed.message;
+    if (parsed.code === 'STORAGE_FAILED') {
+      return 'Could not save the generated image. Ensure Supabase storage is configured on the worker and redeploy the latest code.';
+    }
     if (parsed.code) return `Generation failed (${parsed.code})`;
   } catch {
     return error;

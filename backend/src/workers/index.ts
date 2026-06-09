@@ -60,11 +60,20 @@ process.on('SIGINT', shutdown);
 
 logger.info('Worker process initialized');
 
-// -- RENDER FREE TIER HACK --
-// Render Web Services require an open port to pass health checks.
-// Since this is a worker, we fake an HTTP server so Render doesn't kill it.
+// -- RENDER WEB SERVICE HACK --
+// If this process is deployed as a Render *web* service (MODE=worker), Render scans PORT.
+// Bind the dummy health server to PORT (or WORKER_PORT), not PORT+1.
 import http from 'http';
-const port = process.env.WORKER_PORT || process.env.PORT ? parseInt(process.env.PORT as string) + 1 : 4001;
+function resolveWorkerHealthPort(): number {
+  if (process.env.WORKER_PORT) {
+    return parseInt(process.env.WORKER_PORT, 10);
+  }
+  if (process.env.PORT) {
+    return parseInt(process.env.PORT, 10);
+  }
+  return 4001;
+}
+const port = resolveWorkerHealthPort();
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('Worker is active');
