@@ -191,23 +191,16 @@ export function WalkthroughStage({ projectId }: WalkthroughStageProps) {
     startPolling();
   };
 
-  const handleDownload = async (video: RoomWalkthroughVideo) => {
-    try {
-      const response = await fetch(video.videoUrl);
-      if (!response.ok) throw new Error('Download failed');
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${activeRoom?.name || 'room'}-walkthrough.mp4`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error('Download failed:', err);
-      setError('Failed to download video');
-    }
+  const handleDownload = (video: RoomWalkthroughVideo) => {
+    // Direct navigation avoids CSP connect-src blocks on cross-origin signed URLs.
+    const link = document.createElement('a');
+    link.href = video.videoUrl;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.download = `${activeRoom?.name || 'room'}-walkthrough.mp4`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   if (isLoading) {
